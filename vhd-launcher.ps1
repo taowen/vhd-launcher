@@ -129,7 +129,6 @@ if ($ini.ContainsKey('sourceSaveDir') -and $ini.ContainsKey('targetSaveDir')) {
     $sourceSaveDir = [Environment]::ExpandEnvironmentVariables($sourceSaveDir)
     $targetSaveDir = [Environment]::ExpandEnvironmentVariables($targetSaveDir)
     
-    if ($sourceSaveDir -and $targetSaveDir) {
         if (-not [System.IO.Path]::IsPathRooted($sourceSaveDir)) {
             $sourceSaveDir = "${launchDriveLetter}:\$sourceSaveDir"
         }
@@ -150,9 +149,6 @@ if ($ini.ContainsKey('sourceSaveDir') -and $ini.ContainsKey('targetSaveDir')) {
         } else {
             Write-Host "Symlink or directory already exists at $targetSaveDir, skipping mklink."
         }
-    } else {
-        Write-Host "sourceSaveDir or targetSaveDir is empty, skipping symlink creation."
-    }
 }
 
 ### 9. check if launchPath exists
@@ -184,20 +180,16 @@ function Extract-ExeIcon {
     return $false
 }
 
+$WshShell = New-Object -ComObject WScript.Shell
 $LnkPath = $VhdPath -replace '\.vhd$', '.lnk'
 # If shortcut already exists, skip shortcut creation
 if (Test-Path $LnkPath) {
     Write-Host "Shortcut $LnkPath already exists, skipping shortcut creation."
 } else {
-    # Get only the filename part of $VhdPath for shortcut arguments
     $VhdFileName = [System.IO.Path]::GetFileName($VhdPath)
-
-    # Generate a .lnk shortcut to launch this script via PowerShell
-    $WshShell = New-Object -ComObject WScript.Shell
     $Shortcut = $WshShell.CreateShortcut($LnkPath)
     $Shortcut.TargetPath = "powershell.exe"
     $Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File vhd-launcher.ps1 -VhdPath `"$VhdFileName`""
-    $Shortcut.WindowStyle = 1  # Normal window
     $Shortcut.Description = "Portable link"
     $Shortcut.Save()
 }
@@ -210,10 +202,8 @@ if (Test-Path $DesktopLnkPath) {
     $IconPath = $VhdPath -replace '\.vhd$', '.ico'
     $iconExtracted = Extract-ExeIcon -ExePath $launchPath -IcoPath $IconPath
     $DesktopShortcut = $WshShell.CreateShortcut($DesktopLnkPath)
-    $DesktopShortcut.TargetPath = $Shortcut.TargetPath
+    $DesktopShortcut.TargetPath = "powershell.exe"
     $DesktopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
-    $DesktopShortcut.WindowStyle = $Shortcut.WindowStyle
-    $DesktopShortcut.Description = $Shortcut.Description
     if ($iconExtracted -and (Test-Path $IconPath)) {
         $DesktopShortcut.IconLocation = $IconPath
     }
