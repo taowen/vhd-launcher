@@ -1,17 +1,30 @@
-# always use English
-
 param(
     [Parameter(Mandatory = $true)]
     [string]$VhdPath
 )
 
-Start-Transcript -Path "vhd-launcher.log" -Append
+### 1. setup log file
+$currUser = [Security.Principal.WindowsIdentity]::GetCurrent()
+$principal = New-Object Security.Principal.WindowsPrincipal($currUser)
+$IsAdmin = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
 
-Write-Host "The vhd file path is: $VhdPath"
+if ($IsAdmin) {
+    $LogPath = Join-Path $PSScriptRoot "vhd-launcher.admin.log"
+} else {
+    $LogPath = Join-Path $PSScriptRoot "vhd-launcher.log"
+}
 
+Start-Transcript -Path $LogPath
+
+### 2. ensure vhd file exists
+Write-Host "The raw vhd file path is: $VhdPath"
+Write-Host "The resolved vhd file path is: $VhdPath"
+
+### 3. read configuration
 $IniPath = $VhdPath -replace '\.vhd$', '.ini'
-
-# read .ini file
+if (-not ([System.IO.Path]::IsPathRooted($VhdPath))) {
+    $VhdPath = Join-Path -Path $PWD -ChildPath $VhdPath
+}
 $iniContent = Get-Content $IniPath | Where-Object { $_ -match '=' }
 
 # create a hash table to store key-value
@@ -25,25 +38,83 @@ foreach ($line in $iniContent) {
     }
 }
 
-# read each configuration
 $readonly = $ini['readonly']
-$launchDrive = $ini['launchDrive']
+$launchDriveLetter = $ini['launchDriveLetter']
 $launchExe = $ini['launchExe']
 $sourceSaveDir = $ini['sourceSaveDir']
 $targetSaveDir = $ini['targetSaveDir']
 
-$launchPath = Join-Path $launchDrive $launchExe
+if ($launchDriveLetter -eq 'C' -or $launchDriveLetter -eq 'c') {
+    Write-Error "Error: launchDriveLetter cannot be C or c. Aborting."
+    exit 1
+}
+
+$launchPath = "${launchDriveLetter}:\$launchExe"
 
 Write-Host "readonly: $readonly"
-Write-Host "launchDrive: $launchDrive"
+Write-Host "launchDriveLetter: $launchDriveLetter"
 Write-Host "launchExe: $launchExe"
 Write-Host "launchPath: $launchPath"
 Write-Host "sourceSaveDir: $sourceSaveDir"
 Write-Host "targetSaveDir: $targetSaveDir"
 
+### 4. if already mounted, launch the exe directly
 if (Test-Path $launchPath) {
     Write-Host "launchPath exists, launching: $launchPath"
     Start-Process -FilePath $launchPath
+    exit
 } else {
     Write-Host "launchPath not found: $launchPath"
+}
+
+### 5. elevate to admin
+if (-not $IsAdmin) {
+    Write-Host "Not running as administrator. Relaunching with elevation... "
+    $psi = New-Object System.Diagnostics.ProcessStartInfo
+    $psi.FileName = 'powershell.exe'
+    $psi.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
+    $psi.Verb = 'runas'
+    try {
+        [System.Diagnostics.Process]::Start($psi) | Out-Null
+    } catch {
+        Write-Error "Failed to relaunch as administrator. Aborting."
+        exit 1
+    }
+    exit
+}
+
+### 6. unmount target drive if already mounted
+if (Test-Path "$launchDriveLetter`:") {
+    Write-Host "Drive $launchDriveLetter exists, unmounting..."
+    mountvol "$launchDriveLetter`:" /D
+    Write-Host "Drive $launchDriveLetter unmounted."
+} else {
+    Write-Host "Drive $launchDriveLetter does not exist, no need to unmount."
+}
+
+### 7. mount the vhd in ro or rw mode
+
+# Mount the VHD
+if ($readonly -eq '1' -or $readonly -eq 'true') {
+    Write-Host "Mounting VHD in read-only mode..."
+    $diskImage = Mount-DiskImage -ImagePath $VhdPath -Access ReadOnly -PassThru
+} else {
+    Write-Host "Mounting VHD in read-write mode..."
+    $diskImage = Mount-DiskImage -ImagePath $VhdPath -PassThru
+}
+
+# Get the disk number
+$diskNumber = ($diskImage | Get-DiskImage | Get-Disk).Number
+
+# Get the partition (assuming only one partition, adjust if needed)
+$partition = Get-Partition -DiskNumber $diskNumber | Where-Object { $_.Type -ne 'Reserved' } | Select-Object -First 1
+
+# Assign the drive letter
+if ($partition) {
+    Write-Host "Assigning drive letter $launchDriveLetter to partition..."
+    Set-Partition -DiskNumber $diskNumber -PartitionNumber $partition.PartitionNumber -NewDriveLetter $launchDriveLetter
+    Write-Host "Drive letter $launchDriveLetter assigned."
+} else {
+    Write-Error "No valid partition found on the VHD."
+    exit 1
 }
