@@ -191,8 +191,7 @@ $iconExtracted = Extract-ExeIcon -ExePath $launchPath -IcoPath $IconPath
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut($LnkPath)
 $Shortcut.TargetPath = "powershell.exe"
-$Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdFileName`""
-$Shortcut.WorkingDirectory = $PSScriptRoot
+$Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File vhd-launcher.ps1 -VhdPath `"$VhdFileName`""
 $Shortcut.WindowStyle = 1  # Normal window
 $Shortcut.Description = "Portable link"
 $Shortcut.Save()
@@ -203,7 +202,6 @@ $DesktopLnkPath = Join-Path $DesktopPath ([System.IO.Path]::GetFileName($LnkPath
 $DesktopShortcut = $WshShell.CreateShortcut($DesktopLnkPath)
 $DesktopShortcut.TargetPath = $Shortcut.TargetPath
 $DesktopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
-$DesktopShortcut.WorkingDirectory = $Shortcut.WorkingDirectory
 $DesktopShortcut.WindowStyle = $Shortcut.WindowStyle
 $DesktopShortcut.Description = $Shortcut.Description
 if ($iconExtracted -and (Test-Path $IconPath)) {
