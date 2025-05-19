@@ -41,15 +41,6 @@ foreach ($line in $iniContent) {
 $readonly = $ini['readonly']
 $launchDriveLetter = $ini['launchDriveLetter']
 $launchExe = $ini['launchExe']
-$sourceSaveDir = $ini['sourceSaveDir']
-$targetSaveDir = $ini['targetSaveDir']
-
-$sourceSaveDir = [Environment]::ExpandEnvironmentVariables($sourceSaveDir)
-$targetSaveDir = [Environment]::ExpandEnvironmentVariables($targetSaveDir)
-
-if (-not [System.IO.Path]::IsPathRooted($sourceSaveDir)) {
-    $sourceSaveDir = "${launchDriveLetter}:\$sourceSaveDir"
-}
 
 if (-not ([System.IO.Path]::IsPathRooted($targetSaveDir))) {
     $targetSaveDir = Join-Path -Path (Split-Path -Path $VhdPath -Parent) -ChildPath $targetSaveDir
@@ -66,8 +57,6 @@ Write-Host "readonly: $readonly"
 Write-Host "launchDriveLetter: $launchDriveLetter"
 Write-Host "launchExe: $launchExe"
 Write-Host "launchPath: $launchPath"
-Write-Host "sourceSaveDir: $sourceSaveDir"
-Write-Host "targetSaveDir: $targetSaveDir"
 
 ### 4. if already mounted, launch the exe directly
 if (Test-Path $launchPath) {
@@ -132,21 +121,38 @@ if ($partition) {
 }
 
 ### 8. mklink targetSaveDir to sourceSaveDir
-if (-not (Test-Path $sourceSaveDir)) {
-    Write-Host "sourceSaveDir $sourceSaveDir does not exist. Creating it..."
-    New-Item -ItemType Directory -Path $sourceSaveDir | Out-Null
-}
+if ($ini.ContainsKey('sourceSaveDir') -and $ini.ContainsKey('targetSaveDir')) {
 
-if (-not (Test-Path $targetSaveDir)) {
-    $parentDir = Split-Path -Path $targetSaveDir -Parent
-    if (-not (Test-Path $parentDir)) {
-        Write-Host "Parent directory $parentDir does not exist. Creating it..."
-        New-Item -ItemType Directory -Path $parentDir | Out-Null
+    $sourceSaveDir = $ini['sourceSaveDir']
+    $targetSaveDir = $ini['targetSaveDir']
+    
+    $sourceSaveDir = [Environment]::ExpandEnvironmentVariables($sourceSaveDir)
+    $targetSaveDir = [Environment]::ExpandEnvironmentVariables($targetSaveDir)
+    
+    if ($sourceSaveDir -and $targetSaveDir) {
+        if (-not [System.IO.Path]::IsPathRooted($sourceSaveDir)) {
+            $sourceSaveDir = "${launchDriveLetter}:\$sourceSaveDir"
+        }
+    
+        if (-not (Test-Path $sourceSaveDir)) {
+            Write-Host "sourceSaveDir $sourceSaveDir does not exist. Creating it..."
+            New-Item -ItemType Directory -Path $sourceSaveDir | Out-Null
+        }
+    
+        if (-not (Test-Path $targetSaveDir)) {
+            $parentDir = Split-Path -Path $targetSaveDir -Parent
+            if (-not (Test-Path $parentDir)) {
+                Write-Host "Parent directory $parentDir does not exist. Creating it..."
+                New-Item -ItemType Directory -Path $parentDir | Out-Null
+            }
+            Write-Host "Creating symlink: $targetSaveDir -> $sourceSaveDir"
+            New-Item -ItemType SymbolicLink -Path $targetSaveDir -Target $sourceSaveDir
+        } else {
+            Write-Host "Symlink or directory already exists at $targetSaveDir, skipping mklink."
+        }
+    } else {
+        Write-Host "sourceSaveDir or targetSaveDir is empty, skipping symlink creation."
     }
-    Write-Host "Creating symlink: $targetSaveDir -> $sourceSaveDir"
-    New-Item -ItemType SymbolicLink -Path $targetSaveDir -Target $sourceSaveDir
-} else {
-    Write-Host "Symlink or directory already exists at $targetSaveDir, skipping mklink."
 }
 
 ### 9. check if launchPath exists
@@ -179,35 +185,40 @@ function Extract-ExeIcon {
 }
 
 $LnkPath = $VhdPath -replace '\.vhd$', '.lnk'
-$IconPath = $VhdPath -replace '\.vhd$', '.ico'
+# If shortcut already exists, skip shortcut creation
+if (Test-Path $LnkPath) {
+    Write-Host "Shortcut $LnkPath already exists, skipping shortcut creation."
+} else {
+    # Get only the filename part of $VhdPath for shortcut arguments
+    $VhdFileName = [System.IO.Path]::GetFileName($VhdPath)
 
-# Get only the filename part of $VhdPath for shortcut arguments
-$VhdFileName = [System.IO.Path]::GetFileName($VhdPath)
+    # Generate a .lnk shortcut to launch this script via PowerShell
+    $WshShell = New-Object -ComObject WScript.Shell
+    $Shortcut = $WshShell.CreateShortcut($LnkPath)
+    $Shortcut.TargetPath = "powershell.exe"
+    $Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File vhd-launcher.ps1 -VhdPath `"$VhdFileName`""
+    $Shortcut.WindowStyle = 1  # Normal window
+    $Shortcut.Description = "Portable link"
+    $Shortcut.Save()
+}
 
-# Try to extract the icon
-$iconExtracted = Extract-ExeIcon -ExePath $launchPath -IcoPath $IconPath
-
-# Generate a .lnk shortcut to launch this script via PowerShell
-$WshShell = New-Object -ComObject WScript.Shell
-$Shortcut = $WshShell.CreateShortcut($LnkPath)
-$Shortcut.TargetPath = "powershell.exe"
-$Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File vhd-launcher.ps1 -VhdPath `"$VhdFileName`""
-$Shortcut.WindowStyle = 1  # Normal window
-$Shortcut.Description = "Portable link"
-$Shortcut.Save()
-
-# 额外保存一份到当前用户桌面
 $DesktopPath = [Environment]::GetFolderPath('Desktop')
 $DesktopLnkPath = Join-Path $DesktopPath ([System.IO.Path]::GetFileName($LnkPath))
-$DesktopShortcut = $WshShell.CreateShortcut($DesktopLnkPath)
-$DesktopShortcut.TargetPath = $Shortcut.TargetPath
-$DesktopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
-$DesktopShortcut.WindowStyle = $Shortcut.WindowStyle
-$DesktopShortcut.Description = $Shortcut.Description
-if ($iconExtracted -and (Test-Path $IconPath)) {
-    $DesktopShortcut.IconLocation = $IconPath
+if (Test-Path $DesktopLnkPath) {
+    Write-Host "Shortcut $DesktopLnkPath already exists, skipping shortcut creation."
+} else {
+    $IconPath = $VhdPath -replace '\.vhd$', '.ico'
+    $iconExtracted = Extract-ExeIcon -ExePath $launchPath -IcoPath $IconPath
+    $DesktopShortcut = $WshShell.CreateShortcut($DesktopLnkPath)
+    $DesktopShortcut.TargetPath = $Shortcut.TargetPath
+    $DesktopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
+    $DesktopShortcut.WindowStyle = $Shortcut.WindowStyle
+    $DesktopShortcut.Description = $Shortcut.Description
+    if ($iconExtracted -and (Test-Path $IconPath)) {
+        $DesktopShortcut.IconLocation = $IconPath
+    }
+    $DesktopShortcut.Save()
 }
-$DesktopShortcut.Save()
 
 ### 11. I am admin here, Launch the game as non-admin user
 Write-Host "Launching the game as non-admin user: $launchPath"
