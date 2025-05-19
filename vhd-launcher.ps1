@@ -62,7 +62,8 @@ Write-Host "targetSaveDir: $targetSaveDir"
 if (Test-Path $launchPath) {
     Write-Host "launchPath exists, launching: $launchPath"
     Start-Process -FilePath $launchPath
-    exit
+    Stop-Transcript
+    exit 0
 } else {
     Write-Host "launchPath not found: $launchPath"
 }
@@ -117,4 +118,22 @@ if ($partition) {
 } else {
     Write-Error "No valid partition found on the VHD."
     exit 1
+}
+
+### 8. mklink targetSaveDir to sourceSaveDir
+if (-not (Test-Path $sourceSaveDir)) {
+    Write-Host "sourceSaveDir $sourceSaveDir does not exist. Creating it..."
+    New-Item -ItemType Directory -Path $sourceSaveDir | Out-Null
+}
+
+if (-not (Test-Path $targetSaveDir)) {
+    $parentDir = Split-Path -Path $targetSaveDir -Parent
+    if (-not (Test-Path $parentDir)) {
+        Write-Host "Parent directory $parentDir does not exist. Creating it..."
+        New-Item -ItemType Directory -Path $parentDir | Out-Null
+    }
+    Write-Host "Creating symlink: $targetSaveDir -> $sourceSaveDir"
+    New-Item -ItemType SymbolicLink -Path $targetSaveDir -Target $sourceSaveDir
+} else {
+    Write-Host "Symlink or directory already exists at $targetSaveDir, skipping mklink."
 }
