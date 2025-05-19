@@ -25,6 +25,7 @@ $IniPath = $VhdPath -replace '\.vhd$', '.ini'
 if (-not ([System.IO.Path]::IsPathRooted($VhdPath))) {
     $VhdPath = Join-Path -Path $PWD -ChildPath $VhdPath
 }
+$VhdDir = Split-Path -Path $VhdPath -Parent
 $iniContent = Get-Content $IniPath | Where-Object { $_ -match '=' }
 
 # create a hash table to store key-value
@@ -129,26 +130,26 @@ if ($ini.ContainsKey('sourceSaveDir') -and $ini.ContainsKey('targetSaveDir')) {
     $sourceSaveDir = [Environment]::ExpandEnvironmentVariables($sourceSaveDir)
     $targetSaveDir = [Environment]::ExpandEnvironmentVariables($targetSaveDir)
     
-        if (-not [System.IO.Path]::IsPathRooted($sourceSaveDir)) {
-            $sourceSaveDir = "${launchDriveLetter}:\$sourceSaveDir"
+    if (-not [System.IO.Path]::IsPathRooted($sourceSaveDir)) {
+        $sourceSaveDir = "${launchDriveLetter}:\$sourceSaveDir"
+    }
+
+    if (-not (Test-Path $sourceSaveDir)) {
+        Write-Host "sourceSaveDir $sourceSaveDir does not exist. Creating it..."
+        New-Item -ItemType Directory -Path $sourceSaveDir | Out-Null
+    }
+
+    if (-not (Test-Path $targetSaveDir)) {
+        $parentDir = Split-Path -Path $targetSaveDir -Parent
+        if (-not (Test-Path $parentDir)) {
+            Write-Host "Parent directory $parentDir does not exist. Creating it..."
+            New-Item -ItemType Directory -Path $parentDir | Out-Null
         }
-    
-        if (-not (Test-Path $sourceSaveDir)) {
-            Write-Host "sourceSaveDir $sourceSaveDir does not exist. Creating it..."
-            New-Item -ItemType Directory -Path $sourceSaveDir | Out-Null
-        }
-    
-        if (-not (Test-Path $targetSaveDir)) {
-            $parentDir = Split-Path -Path $targetSaveDir -Parent
-            if (-not (Test-Path $parentDir)) {
-                Write-Host "Parent directory $parentDir does not exist. Creating it..."
-                New-Item -ItemType Directory -Path $parentDir | Out-Null
-            }
-            Write-Host "Creating symlink: $targetSaveDir -> $sourceSaveDir"
-            New-Item -ItemType SymbolicLink -Path $targetSaveDir -Target $sourceSaveDir
-        } else {
-            Write-Host "Symlink or directory already exists at $targetSaveDir, skipping mklink."
-        }
+        Write-Host "Creating symlink: $targetSaveDir -> $sourceSaveDir"
+        New-Item -ItemType SymbolicLink -Path $targetSaveDir -Target $sourceSaveDir
+    } else {
+        Write-Host "Symlink or directory already exists at $targetSaveDir, skipping mklink."
+    }
 }
 
 ### 9. check if launchPath exists
@@ -181,7 +182,7 @@ function Extract-ExeIcon {
 }
 
 $WshShell = New-Object -ComObject WScript.Shell
-$LnkPath = $VhdPath -replace '\.vhd$', '.lnk'
+$LnkPath = Join-Path -Path $VhdDir -ChildPath "start.lnk"
 # If shortcut already exists, skip shortcut creation
 if (Test-Path $LnkPath) {
     Write-Host "Shortcut $LnkPath already exists, skipping shortcut creation."
