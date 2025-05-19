@@ -62,7 +62,9 @@ Write-Host "launchPath: $launchPath"
 ### 4. if already mounted, launch the exe directly
 if (Test-Path $launchPath) {
     Write-Host "launchPath exists, launching: $launchPath"
-    Start-Process -FilePath $launchPath
+    $workingDir = Split-Path -Parent $launchPath
+    $fileName = Split-Path -Leaf $launchPath
+    Start-Process -FilePath $fileName -WorkingDirectory $workingDir
     Stop-Transcript
     exit 0
 } else {
@@ -221,6 +223,8 @@ if (Test-Path $DesktopLnkPath) {
     $DesktopShortcut.Save()
 }
 
-### 11. I am admin here, Launch the game as non-admin user
-Write-Host "Launching the game as non-admin user: $launchPath"
-Start-Process -FilePath "explorer.exe" -ArgumentList "`"$launchPath`""
+### 11. Launch the game
+Write-Host "Launching the game: $launchPath"
+$workingDir = Split-Path -Parent $launchPath
+$fileName = Split-Path -Leaf $launchPath
+Start-Process -FilePath $fileName -WorkingDirectory $workingDir
