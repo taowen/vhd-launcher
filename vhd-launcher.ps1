@@ -25,11 +25,13 @@ foreach ($line in $iniContent) {
 
 # read each configuration
 $readonly = $ini['readonly']
+$targetDrive = $ini['targetDrive']
 $launch = $ini['launch']
 $sourceSaveDir = $ini['sourceSaveDir']
 $targetSaveDir = $ini['targetSaveDir']
 
 Write-Host "readonly: $readonly"
+Write-Host "targetDrive: $targetDrive"
 Write-Host "launch: $launch"
 Write-Host "sourceSaveDir: $sourceSaveDir"
 Write-Host "targetSaveDir: $targetSaveDir"
