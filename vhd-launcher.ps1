@@ -181,6 +181,9 @@ function Extract-ExeIcon {
 $LnkPath = $VhdPath -replace '\.vhd$', '.lnk'
 $IconPath = $VhdPath -replace '\.vhd$', '.ico'
 
+# Get only the filename part of $VhdPath for shortcut arguments
+$VhdFileName = [System.IO.Path]::GetFileName($VhdPath)
+
 # Try to extract the icon
 $iconExtracted = Extract-ExeIcon -ExePath $launchPath -IcoPath $IconPath
 
@@ -188,14 +191,25 @@ $iconExtracted = Extract-ExeIcon -ExePath $launchPath -IcoPath $IconPath
 $WshShell = New-Object -ComObject WScript.Shell
 $Shortcut = $WshShell.CreateShortcut($LnkPath)
 $Shortcut.TargetPath = "powershell.exe"
-$Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
+$Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdFileName`""
 $Shortcut.WorkingDirectory = $PSScriptRoot
 $Shortcut.WindowStyle = 1  # Normal window
-$Shortcut.Description = "Launch VHD with vhd-launcher"
-if ($iconExtracted -and (Test-Path $IconPath)) {
-    $Shortcut.IconLocation = $IconPath
-}
+$Shortcut.Description = "Portable link"
 $Shortcut.Save()
+
+# 额外保存一份到当前用户桌面
+$DesktopPath = [Environment]::GetFolderPath('Desktop')
+$DesktopLnkPath = Join-Path $DesktopPath ([System.IO.Path]::GetFileName($LnkPath))
+$DesktopShortcut = $WshShell.CreateShortcut($DesktopLnkPath)
+$DesktopShortcut.TargetPath = $Shortcut.TargetPath
+$DesktopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
+$DesktopShortcut.WorkingDirectory = $Shortcut.WorkingDirectory
+$DesktopShortcut.WindowStyle = $Shortcut.WindowStyle
+$DesktopShortcut.Description = $Shortcut.Description
+if ($iconExtracted -and (Test-Path $IconPath)) {
+    $DesktopShortcut.IconLocation = $IconPath
+}
+$DesktopShortcut.Save()
 
 ### 11. I am admin here, Launch the game as non-admin user
 Write-Host "Launching the game as non-admin user: $launchPath"
