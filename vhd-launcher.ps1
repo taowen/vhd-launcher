@@ -191,26 +191,6 @@ if (-not (Test-Path $launchPath)) {
 }
 
 ### 10. generate lnk file
-function Extract-ExeIcon {
-    param (
-        [string]$ExePath,
-        [string]$IcoPath
-    )
-    Add-Type -AssemblyName System.Drawing
-    try {
-        $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($ExePath)
-        if ($icon) {
-            $stream = New-Object System.IO.FileStream($IcoPath, [System.IO.FileMode]::Create)
-            $icon.Save($stream)
-            $stream.Close()
-            return $true
-        }
-    } catch {
-        Write-Host "Failed to extract icon: $_"
-    }
-    return $false
-}
-
 $WshShell = New-Object -ComObject WScript.Shell
 $LnkPath = Join-Path -Path $VhdDir -ChildPath "start.lnk"
 # If shortcut already exists, skip shortcut creation
@@ -232,11 +212,6 @@ if (Test-Path $DesktopLnkPath) {
     Write-Host "Shortcut $DesktopLnkPath already exists, skipping shortcut creation."
 } else {
     $IconPath = $VhdPath -replace '\.vhd$', '.ico'
-    if (Test-Path $IconPath) {
-        Write-Host "Skip extract icon"
-    } else {
-        Extract-ExeIcon -ExePath $launchPath -IcoPath $IconPath
-    }
     $DesktopShortcut = $WshShell.CreateShortcut($DesktopLnkPath)
     $DesktopShortcut.TargetPath = "powershell.exe"
     $DesktopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
