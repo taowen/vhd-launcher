@@ -44,6 +44,17 @@ $launchExe = $ini['launchExe']
 $sourceSaveDir = $ini['sourceSaveDir']
 $targetSaveDir = $ini['targetSaveDir']
 
+$sourceSaveDir = [Environment]::ExpandEnvironmentVariables($sourceSaveDir)
+$targetSaveDir = [Environment]::ExpandEnvironmentVariables($targetSaveDir)
+
+if (-not [System.IO.Path]::IsPathRooted($sourceSaveDir)) {
+    $sourceSaveDir = "${launchDriveLetter}:\$sourceSaveDir"
+}
+
+if (-not ([System.IO.Path]::IsPathRooted($targetSaveDir))) {
+    $targetSaveDir = Join-Path -Path (Split-Path -Path $VhdPath -Parent) -ChildPath $targetSaveDir
+}
+
 if ($launchDriveLetter -eq 'C' -or $launchDriveLetter -eq 'c') {
     Write-Error "Error: launchDriveLetter cannot be C or c. Aborting."
     exit 1
