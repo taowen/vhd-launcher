@@ -88,8 +88,38 @@ if (-not $IsAdmin) {
 ### 6. unmount target drive if already mounted
 if (Test-Path "$launchDriveLetter`:") {
     Write-Host "Drive $launchDriveLetter exists, unmounting..."
-    mountvol "$launchDriveLetter`:" /D
-    Write-Host "Drive $launchDriveLetter unmounted."
+    $unmountSuccess = $false
+    $diskImageToUnmount = Get-DiskImage -DevicePath "\\.\${launchDriveLetter}:" -ErrorAction SilentlyContinue
+    if ($diskImageToUnmount -and $diskImageToUnmount.ImagePath) {
+        Write-Host "Dismounting VHD '$($diskImageToUnmount.ImagePath)' currently on $launchDriveLetter`:"
+        Dismount-DiskImage -ImagePath $diskImageToUnmount.ImagePath -ErrorAction Stop
+        $unmountSuccess = $true
+        Write-Host "VHD dismounted successfully."
+    } else {
+        $partition = Get-Partition -DriveLetter $launchDriveLetter.ToCharArray()[0] -ErrorAction SilentlyContinue
+        if ($partition) {
+            Write-Host "Removing access path for partition on $launchDriveLetter`:"
+            $parentDisk = Get-Disk -Partition $partition
+            if ($parentDisk.StorageType -eq "VirtualHardDisk") {
+                Write-Warning "$launchDriveLetter`: is a partition on a VHD. Removing its access path."
+            }
+            Remove-PartitionAccessPath -DiskNumber $partition.DiskNumber -PartitionNumber $partition.PartitionNumber -AccessPath "${launchDriveLetter}:\" -ErrorAction Stop
+            $unmountSuccess = $true
+            Write-Host "Partition access path removed."
+        } elseif (Test-Path -LiteralPath "${launchDriveLetter}:\") {
+            Write-Host "Drive $launchDriveLetter`:\ exists but not as a known VHD or partition. Attempting mountvol /D."
+            mountvol "${launchDriveLetter}:" /D
+            $unmountSuccess = $true
+            Write-Host "mountvol /D executed."
+        } else {
+            Write-Host "$launchDriveLetter`: does not seem to be in use. No unmount action taken."
+            $unmountSuccess = $true
+        }
+    }
+    if ($unmountSuccess) {
+        Write-Host "Unmount/clear attempt for $launchDriveLetter`: complete. Waiting for system to catch up..."
+        Start-Sleep -Seconds 3
+    }
 } else {
     Write-Host "Drive $launchDriveLetter does not exist, no need to unmount."
 }
@@ -196,16 +226,21 @@ if (Test-Path $LnkPath) {
 }
 
 $DesktopPath = [Environment]::GetFolderPath('Desktop')
-$DesktopLnkPath = Join-Path $DesktopPath ([System.IO.Path]::GetFileName($LnkPath))
+$DesktopLnkPath = $VhdPath -replace '\.vhd$', '.lnk'
+$DesktopLnkPath = Join-Path $DesktopPath ([System.IO.Path]::GetFileName($DesktopLnkPath))
 if (Test-Path $DesktopLnkPath) {
     Write-Host "Shortcut $DesktopLnkPath already exists, skipping shortcut creation."
 } else {
     $IconPath = $VhdPath -replace '\.vhd$', '.ico'
-    $iconExtracted = Extract-ExeIcon -ExePath $launchPath -IcoPath $IconPath
+    if (Test-Path $IconPath) {
+        Write-Host "Skip extract icon"
+    } else {
+        Extract-ExeIcon -ExePath $launchPath -IcoPath $IconPath
+    }
     $DesktopShortcut = $WshShell.CreateShortcut($DesktopLnkPath)
     $DesktopShortcut.TargetPath = "powershell.exe"
     $DesktopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
-    if ($iconExtracted -and (Test-Path $IconPath)) {
+    if (Test-Path $IconPath) {
         $DesktopShortcut.IconLocation = $IconPath
     }
     $DesktopShortcut.Save()
