@@ -138,6 +138,54 @@ if (-not (Test-Path $targetSaveDir)) {
     Write-Host "Symlink or directory already exists at $targetSaveDir, skipping mklink."
 }
 
-### 9. I am admin here, Launch the game as non-admin user
+### 9. check if launchPath exists
+if (-not (Test-Path $launchPath)) {
+    Write-Error "Error: launchPath does not exist after mounting: $launchPath"
+    exit 1
+} else {
+    Write-Host "launchPath exists after mounting: $launchPath"
+}
+
+### 10. generate lnk file
+function Extract-ExeIcon {
+    param (
+        [string]$ExePath,
+        [string]$IcoPath
+    )
+    Add-Type -AssemblyName System.Drawing
+    try {
+        $icon = [System.Drawing.Icon]::ExtractAssociatedIcon($ExePath)
+        if ($icon) {
+            $stream = New-Object System.IO.FileStream($IcoPath, [System.IO.FileMode]::Create)
+            $icon.Save($stream)
+            $stream.Close()
+            return $true
+        }
+    } catch {
+        Write-Host "Failed to extract icon: $_"
+    }
+    return $false
+}
+
+$LnkPath = $VhdPath -replace '\.vhd$', '.lnk'
+$IconPath = $VhdPath -replace '\.vhd$', '.ico'
+
+# Try to extract the icon
+$iconExtracted = Extract-ExeIcon -ExePath $launchPath -IcoPath $IconPath
+
+# Generate a .lnk shortcut to launch this script via PowerShell
+$WshShell = New-Object -ComObject WScript.Shell
+$Shortcut = $WshShell.CreateShortcut($LnkPath)
+$Shortcut.TargetPath = "powershell.exe"
+$Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
+$Shortcut.WorkingDirectory = $PSScriptRoot
+$Shortcut.WindowStyle = 1  # Normal window
+$Shortcut.Description = "Launch VHD with vhd-launcher"
+if ($iconExtracted -and (Test-Path $IconPath)) {
+    $Shortcut.IconLocation = $IconPath
+}
+$Shortcut.Save()
+
+### 11. I am admin here, Launch the game as non-admin user
 Write-Host "Launching the game as non-admin user: $launchPath"
 Start-Process -FilePath "explorer.exe" -ArgumentList "`"$launchPath`""
