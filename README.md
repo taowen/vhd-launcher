@@ -1,5 +1,6 @@
 # vhd-launcher
-download and launch windows game in sdcard as a single file
+
+Download and launch windows game in sdcard as a single file. Save the time of downloading and speed up game loading.
 
 * mount vhd file as Z drive and launch game exe file
 * vhd supports compression
