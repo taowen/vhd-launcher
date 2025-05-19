@@ -137,3 +137,7 @@ if (-not (Test-Path $targetSaveDir)) {
 } else {
     Write-Host "Symlink or directory already exists at $targetSaveDir, skipping mklink."
 }
+
+### 9. I am admin here, Launch the game as non-admin user
+Write-Host "Launching the game as non-admin user: $launchPath"
+Start-Process -FilePath "explorer.exe" -ArgumentList "`"$launchPath`""
