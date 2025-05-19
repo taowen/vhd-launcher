@@ -1,3 +1,5 @@
+# always use English
+
 param(
     [Parameter(Mandatory = $true)]
     [string]$VhdPath
@@ -25,13 +27,23 @@ foreach ($line in $iniContent) {
 
 # read each configuration
 $readonly = $ini['readonly']
-$targetDrive = $ini['targetDrive']
-$launch = $ini['launch']
+$launchDrive = $ini['launchDrive']
+$launchExe = $ini['launchExe']
 $sourceSaveDir = $ini['sourceSaveDir']
 $targetSaveDir = $ini['targetSaveDir']
 
+$launchPath = Join-Path $launchDrive $launchExe
+
 Write-Host "readonly: $readonly"
-Write-Host "targetDrive: $targetDrive"
-Write-Host "launch: $launch"
+Write-Host "launchDrive: $launchDrive"
+Write-Host "launchExe: $launchExe"
+Write-Host "launchPath: $launchPath"
 Write-Host "sourceSaveDir: $sourceSaveDir"
 Write-Host "targetSaveDir: $targetSaveDir"
+
+if (Test-Path $launchPath) {
+    Write-Host "launchPath exists, launching: $launchPath"
+    Start-Process -FilePath $launchPath
+} else {
+    Write-Host "launchPath not found: $launchPath"
+}
