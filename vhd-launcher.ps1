@@ -3,6 +3,46 @@ param(
     [string]$VhdPath
 )
 
+function LaunchAndMonitor {
+    param(
+        [string]$LaunchPath,
+        [string]$DriveLetter,
+        [int]$MonitorDuration = 60,
+        [int]$MonitorInterval = 3
+    )
+    
+    Write-Host "Launching the game: $LaunchPath"
+    $workingDir = Split-Path -Parent $LaunchPath
+    $fileName = Split-Path -Leaf $LaunchPath
+    Start-Process -FilePath $fileName -WorkingDirectory $workingDir
+
+    ### Monitor disk performance
+    $endTime = (Get-Date).AddSeconds($MonitorDuration)
+
+    # Get the disk number for the drive letter
+    $diskNumber = (Get-Partition -DriveLetter $DriveLetter).DiskNumber
+    $DriveLetter = $DriveLetter + ":"
+
+    while ((Get-Date) -lt $endTime) {
+        try {
+            $diskRead = Get-Counter "\PhysicalDisk($diskNumber $DriveLetter)\Disk Reads/sec" -ErrorAction Stop
+            $diskReadBytes = Get-Counter "\PhysicalDisk($diskNumber $DriveLetter)\Disk Read Bytes/sec" -ErrorAction Stop
+            
+            $readsPerSec = [math]::Round($diskRead.CounterSamples.CookedValue, 2)
+            $bytesPerSec = [math]::Round($diskReadBytes.CounterSamples.CookedValue / 1MB, 2)
+            Write-Host "Drive $DriveLetter - Reads/sec: $readsPerSec, Read Speed: $bytesPerSec MB/s"
+        } catch {
+            Write-Host "Error accessing performance counters for drive $DriveLetter`: $_"
+            Write-Host "Listing available PhysicalDisk counters:"
+            Get-Counter -ListSet "PhysicalDisk" | Select-Object -ExpandProperty Counter | Where-Object { $_ -like "*$DriveLetter*" } | ForEach-Object {
+                Write-Host "  $_"
+            }
+        }
+        
+        Start-Sleep -Seconds $MonitorInterval
+    }
+}
+
 ### 1. setup log file
 $currUser = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($currUser)
@@ -18,14 +58,13 @@ Start-Transcript -Path $LogPath
 
 ### 2. ensure vhd file exists
 Write-Host "The raw vhd file path is: $VhdPath"
+if (-not ([System.IO.Path]::IsPathRooted($VhdPath))) {
+    $VhdPath = Join-Path -Path $PWD -ChildPath $VhdPath
+}
 Write-Host "The resolved vhd file path is: $VhdPath"
 
 ### 3. read configuration
 $IniPath = $VhdPath -replace '\.vhd$', '.ini'
-if (-not ([System.IO.Path]::IsPathRooted($VhdPath))) {
-    $VhdPath = Join-Path -Path $PWD -ChildPath $VhdPath
-}
-$VhdDir = Split-Path -Path $VhdPath -Parent
 $iniContent = Get-Content $IniPath | Where-Object { $_ -match '=' }
 
 # create a hash table to store key-value
@@ -62,9 +101,8 @@ Write-Host "launchPath: $launchPath"
 ### 4. if already mounted, launch the exe directly
 if (Test-Path $launchPath) {
     Write-Host "launchPath exists, launching: $launchPath"
-    $workingDir = Split-Path -Parent $launchPath
-    $fileName = Split-Path -Leaf $launchPath
-    Start-Process -FilePath $fileName -WorkingDirectory $workingDir
+    $ReadDiskLetter = $VhdPath.Substring(0, 1)
+    LaunchAndMonitor -LaunchPath $launchPath -DriveLetter $ReadDiskLetter
     Stop-Transcript
     exit 0
 } else {
@@ -194,6 +232,7 @@ if (-not (Test-Path $launchPath)) {
 
 ### 10. generate lnk file
 $WshShell = New-Object -ComObject WScript.Shell
+$VhdDir = Split-Path -Path $VhdPath -Parent
 $LnkPath = Join-Path -Path $VhdDir -ChildPath "start.lnk"
 # If shortcut already exists, skip shortcut creation
 if (Test-Path $LnkPath) {
@@ -224,7 +263,5 @@ if (Test-Path $DesktopLnkPath) {
 }
 
 ### 11. Launch the game
-Write-Host "Launching the game: $launchPath"
-$workingDir = Split-Path -Parent $launchPath
-$fileName = Split-Path -Leaf $launchPath
-Start-Process -FilePath $fileName -WorkingDirectory $workingDir
+$ReadDiskLetter = $VhdPath.Substring(0, 1)
+LaunchAndMonitor -LaunchPath $launchPath -DriveLetter $ReadDiskLetter
