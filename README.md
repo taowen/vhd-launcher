@@ -7,7 +7,7 @@
 
 # usage
 
-prepare a vhd file containing the game
+prepare a vhd file containing the game. Windows Disk Manager supports create and attach vhd file out of box, just create a vhd, mount it and copy the game files.
 
 write a ini file to describe the game directory layout, such as ninja-gaiden1.vhd and ninja-gaiden1.ini
 
