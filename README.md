@@ -1,14 +1,15 @@
 # vhd-launcher
 
-Download and launch windows game in sdcard as a single file. Save the time of downloading and speed up game loading.
-
-* mount vhd file as Z drive and launch game exe file
+* package windows game directory as a single vhd file
 * vhd supports compression
+* download to tf card and start playing directly without decompression
 * redirect individual game save folder to a central folder such as C:\game-saves\xxx, so that we can cloud sync
 
 # usage
 
-prepare a vhd file and ini file, such as ninja-gaiden1.vhd and ninja-gaiden1.ini
+prepare a vhd file containing the game
+
+write a ini file to describe the game directory layout, such as ninja-gaiden1.vhd and ninja-gaiden1.ini
 
 ```
 readonly=true
@@ -27,6 +28,6 @@ C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe -NoProfile -ExecutionP
 this will mount the vhd and launch the game, it will also
 
 * link the save dir `C:\Users\taowe\Documents\KoeiTecmo\NINJAGAIDENSIGMA` <-> `C:\game-save\ninja-gaiden1`
-* create a `C:\workspace\vhd-launcher\ninja-gaiden1.lnk` `C:\workspace\vhd-launcher\ninja-gaiden1.ico` file
+* create a desktop link (optionally, you can provide a ico file to make it pretty)
 
-you can copy the lnk and ico file to windows desktop to use as shortcut
+the files can be copied to other machines
