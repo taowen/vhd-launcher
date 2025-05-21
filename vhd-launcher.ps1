@@ -61,6 +61,12 @@ Write-Host "The raw vhd file path is: $VhdPath"
 if (-not ([System.IO.Path]::IsPathRooted($VhdPath))) {
     $VhdPath = Join-Path -Path $PWD -ChildPath $VhdPath
 }
+if (-not (Test-Path $VhdPath)) {
+    Write-Error "Error: VHD file not found at path: $VhdPath"
+    Stop-Transcript
+    exit 1
+}
+
 Write-Host "The resolved vhd file path is: $VhdPath"
 
 ### 3. read configuration
@@ -191,7 +197,48 @@ if ($partition) {
     exit 1
 }
 
-### 8. mklink targetSaveDir to sourceSaveDir
+### 8. link patch files
+
+# Determine patch folder path (next to VHD)
+$VhdDir = Split-Path -Path $VhdPath -Parent
+$PatchDir = Join-Path $VhdDir 'patch'
+
+if (Test-Path $PatchDir) {
+    Write-Host "Patch folder found: $PatchDir. Linking patch files..."
+    # Recursively get all files in patch
+    $patchFiles = Get-ChildItem -Path $PatchDir -Recurse -File
+    foreach ($patchFile in $patchFiles) {
+        # Compute relative path from patch dir
+        $relativePath = $patchFile.FullName.Substring($PatchDir.Length).TrimStart('\','/')
+        # Target path on mounted drive
+        $targetPath = Join-Path "${launchDriveLetter}:\" $relativePath
+        $targetDir = Split-Path -Path $targetPath -Parent
+        # Ensure target directory exists
+        if ($targetDir -and -not (Test-Path $targetDir)) {
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+        }
+        # If symlink already exists, check if it points to the correct file
+        if ((Test-Path $targetPath) -and ((Get-Item $targetPath).LinkType -eq 'SymbolicLink')) {
+            $existingTarget = (Get-Item $targetPath).Target
+            if ($existingTarget -eq $patchFile.FullName) {
+                Write-Host "Symlink already exists at $targetPath and points to correct file, skipping."
+                continue
+            } else {
+                Write-Host "Symlink at $targetPath points to $existingTarget, expected $($patchFile.FullName). Replacing."
+                Remove-Item $targetPath -Force
+            }
+        } elseif ((Test-Path $targetPath) -and ((Get-Item $targetPath).LinkType -ne 'SymbolicLink')) {
+            Remove-Item $targetPath -Force
+        }
+        # Create symlink
+        Write-Host "Creating symlink: $targetPath -> $($patchFile.FullName)"
+        New-Item -ItemType SymbolicLink -Path $targetPath -Target $patchFile.FullName | Out-Null
+    }
+} else {
+    Write-Host "No patch folder found at $PatchDir. Skipping patch linking."
+}
+
+### 9. mklink targetSaveDir to sourceSaveDir
 if ($ini.ContainsKey('sourceSaveDir') -and $ini.ContainsKey('targetSaveDir')) {
 
     $sourceSaveDir = $ini['sourceSaveDir']
@@ -222,7 +269,7 @@ if ($ini.ContainsKey('sourceSaveDir') -and $ini.ContainsKey('targetSaveDir')) {
     }
 }
 
-### 9. check if launchPath exists
+### 10. check if launchPath exists
 if (-not (Test-Path $launchPath)) {
     Write-Error "Error: launchPath does not exist after mounting: $launchPath"
     exit 1
@@ -230,7 +277,7 @@ if (-not (Test-Path $launchPath)) {
     Write-Host "launchPath exists after mounting: $launchPath"
 }
 
-### 10. generate lnk file
+### 11. generate lnk file
 $WshShell = New-Object -ComObject WScript.Shell
 $VhdDir = Split-Path -Path $VhdPath -Parent
 $LnkPath = Join-Path -Path $VhdDir -ChildPath "start.lnk"
@@ -262,6 +309,6 @@ if (Test-Path $DesktopLnkPath) {
     $DesktopShortcut.Save()
 }
 
-### 11. Launch the game
+### 12. Launch the game
 $ReadDiskLetter = $VhdPath.Substring(0, 1)
 LaunchAndMonitor -LaunchPath $launchPath -DriveLetter $ReadDiskLetter
