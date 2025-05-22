@@ -1,5 +1,5 @@
 param(
-    [Parameter(Mandatory = $true)]
+    [Parameter(Mandatory = $false)]
     [string]$VhdPath
 )
 
@@ -58,6 +58,23 @@ Start-Transcript -Path $LogPath
 
 ### 2. ensure vhd file exists
 Write-Host "The raw vhd file path is: $VhdPath"
+
+# If VhdPath is not provided, search for *.vhd in the current directory
+if (-not $VhdPath -or $VhdPath -eq "") {
+    $vhdFiles = Get-ChildItem -Path $PWD -Filter *.vhd | Select-Object -ExpandProperty FullName
+    if ($vhdFiles.Count -eq 0) {
+        Write-Error "Error: No VHD file found in the current directory. Please specify -VhdPath."
+        exit 1
+    } elseif ($vhdFiles.Count -eq 1) {
+        $VhdPath = $vhdFiles[0]
+        Write-Host "VhdPath not provided. Using found VHD: $VhdPath"
+    } else {
+        Write-Error "Error: Multiple VHD files found in the current directory. Please specify -VhdPath."
+        $vhdFiles | ForEach-Object { Write-Host $_ }
+        exit 1
+    }
+}
+
 if (-not ([System.IO.Path]::IsPathRooted($VhdPath))) {
     $VhdPath = Join-Path -Path $PWD -ChildPath $VhdPath
 }
