@@ -1,6 +1,9 @@
 param(
     [Parameter(Mandatory = $false)]
-    [string]$VhdPath
+    [string]$VhdPath,
+    [Parameter(Mandatory = $false)]
+    [ValidateSet('launch', 'add-desktop-shortcut', 'add-steam-shortcut')]
+    [string]$Action = 'launch'
 )
 
 function LaunchAndMonitor {
@@ -61,7 +64,7 @@ Write-Host "The raw vhd file path is: $VhdPath"
 
 # If VhdPath is not provided, search for *.vhd in the current directory
 if (-not $VhdPath -or $VhdPath -eq "") {
-    $vhdFiles = Get-ChildItem -Path $PWD -Filter *.vhd | Select-Object -ExpandProperty FullName
+    $vhdFiles = @(Get-ChildItem -Path $PWD -Filter *.vhd | Select-Object -ExpandProperty FullName)
     if ($vhdFiles.Count -eq 0) {
         Write-Error "Error: No VHD file found in the current directory. Please specify -VhdPath."
         exit 1
@@ -85,6 +88,42 @@ if (-not (Test-Path $VhdPath)) {
 }
 
 Write-Host "The resolved vhd file path is: $VhdPath"
+
+### 2.1. add desktop shortcut
+if ($Action -eq 'add-desktop-shortcut') {
+    $WshShell = New-Object -ComObject WScript.Shell
+    $VhdDir = Split-Path -Path $VhdPath -Parent
+    $LnkPath = Join-Path -Path $VhdDir -ChildPath "start.lnk"
+    # If shortcut already exists, skip shortcut creation
+    if (Test-Path $LnkPath) {
+        Write-Host "Shortcut $LnkPath already exists, skipping shortcut creation."
+    } else {
+        $VhdFileName = [System.IO.Path]::GetFileName($VhdPath)
+        $Shortcut = $WshShell.CreateShortcut($LnkPath)
+        $Shortcut.TargetPath = "powershell.exe"
+        $Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File vhd-launcher.ps1 -VhdPath `"$VhdFileName`""
+        $Shortcut.Description = "Portable link"
+        $Shortcut.Save()
+    }
+
+    $DesktopPath = [Environment]::GetFolderPath('Desktop')
+    $DesktopLnkPath = $VhdPath -replace '\.vhd$', '.lnk'
+    $DesktopLnkPath = Join-Path $DesktopPath ([System.IO.Path]::GetFileName($DesktopLnkPath))
+    if (Test-Path $DesktopLnkPath) {
+        Write-Host "Shortcut $DesktopLnkPath already exists, skipping shortcut creation."
+    } else {
+        $IconPath = $VhdPath -replace '\.vhd$', '.ico'
+        $DesktopShortcut = $WshShell.CreateShortcut($DesktopLnkPath)
+        $DesktopShortcut.TargetPath = "powershell.exe"
+        $DesktopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
+        if (Test-Path $IconPath) {
+            $DesktopShortcut.IconLocation = $IconPath
+        }
+        $DesktopShortcut.Save()
+    }
+    Stop-Transcript
+    exit 0
+}
 
 ### 3. read configuration
 $IniPath = $VhdPath -replace '\.vhd$', '.ini'
@@ -294,38 +333,6 @@ if (-not (Test-Path $launchPath)) {
     Write-Host "launchPath exists after mounting: $launchPath"
 }
 
-### 11. generate lnk file
-$WshShell = New-Object -ComObject WScript.Shell
-$VhdDir = Split-Path -Path $VhdPath -Parent
-$LnkPath = Join-Path -Path $VhdDir -ChildPath "start.lnk"
-# If shortcut already exists, skip shortcut creation
-if (Test-Path $LnkPath) {
-    Write-Host "Shortcut $LnkPath already exists, skipping shortcut creation."
-} else {
-    $VhdFileName = [System.IO.Path]::GetFileName($VhdPath)
-    $Shortcut = $WshShell.CreateShortcut($LnkPath)
-    $Shortcut.TargetPath = "powershell.exe"
-    $Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File vhd-launcher.ps1 -VhdPath `"$VhdFileName`""
-    $Shortcut.Description = "Portable link"
-    $Shortcut.Save()
-}
-
-$DesktopPath = [Environment]::GetFolderPath('Desktop')
-$DesktopLnkPath = $VhdPath -replace '\.vhd$', '.lnk'
-$DesktopLnkPath = Join-Path $DesktopPath ([System.IO.Path]::GetFileName($DesktopLnkPath))
-if (Test-Path $DesktopLnkPath) {
-    Write-Host "Shortcut $DesktopLnkPath already exists, skipping shortcut creation."
-} else {
-    $IconPath = $VhdPath -replace '\.vhd$', '.ico'
-    $DesktopShortcut = $WshShell.CreateShortcut($DesktopLnkPath)
-    $DesktopShortcut.TargetPath = "powershell.exe"
-    $DesktopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
-    if (Test-Path $IconPath) {
-        $DesktopShortcut.IconLocation = $IconPath
-    }
-    $DesktopShortcut.Save()
-}
-
-### 12. Launch the game
+### 11. Launch the game
 $ReadDiskLetter = $VhdPath.Substring(0, 1)
 LaunchAndMonitor -LaunchPath $launchPath -DriveLetter $ReadDiskLetter
