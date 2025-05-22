@@ -46,27 +46,6 @@ function LaunchAndMonitor {
     }
 }
 
-function Get-LibraryFoldersVdf {
-    $location = "/config/libraryfolders.vdf"
-    $oldLocation = "/steamapps/libraryfolders.vdf"
-
-    $steamDirectory = Find-SteamDirectory
-
-    $locationExists = Test-Path -Path "$steamDirectory$location"
-    if ($locationExists) {
-        $result = Get-Content -Raw "$steamDirectory$location"
-    } else {
-        $locationExists = Test-Path -Path "$steamDirectory$oldLocation"
-        if ($locationExists) {
-            $result = Get-Content -Raw "$steamDirectory$oldLocation"
-        } else {
-            return $null
-        }
-    }
-
-    return $result
-}
-
 function Get-CurrentUserSteamRegistryKeyPath {
     return @("HKCU:\Software\Valve\Steam", "SteamPath")
 }
@@ -97,56 +76,177 @@ function Find-SteamDirectory {
     }
 }
 
-function ConvertTo-PSObject {
-    param (
-        [Parameter(Mandatory=$true)]
-        [string]$vdfContent
-    )
+function Parse-VDFBuffer {  
+    param(  
+        [byte[]]$Buffer,  
+        [hashtable]$Options = @{  
+            autoConvertBooleans = $true  
+            autoConvertArrays = $true  
+            dateProperties = @('LastPlayTime')  
+        }  
+    )  
+      
+    # VDF type constants from constants.js  
+    $VDF_TYPES = @{  
+        object = 0x00  
+        string = 0x01  
+        int = 0x02  
+    }  
+      
+    $VDF_SPECIAL = @{  
+        objectEnd = 0x08  
+        stringEnd = 0x00  
+        propertyNameEnd = 0x00  
+    }  
+      
+    # Parser context object  
+    $context = @{  
+        buffer = $Buffer  
+        position = 0  
+        options = $Options  
+    }  
+      
+    function Test-IsNumber {  
+        param([string]$str)  
+        return $str -match '^\d+$'  
+    }  
+      
+    function Read-StringValue {  
+        param($ctx)  
+          
+        $start = $ctx.position  
+        while ($ctx.buffer[$ctx.position] -ne $VDF_SPECIAL.stringEnd) {  
+            $ctx.position++  
+        }  
+          
+        $length = $ctx.position - $start  
+        $value = [System.Text.Encoding]::UTF8.GetString($ctx.buffer, $start, $length)  
+        $ctx.position++ # Skip string terminator  
+        return $value  
+    }  
+      
+    function Read-IntValue {  
+        param($ctx)  
+          
+        $value = [BitConverter]::ToInt32($ctx.buffer, $ctx.position)  
+        $ctx.position += 4  
+        return $value  
+    }  
+      
+    function Read-ObjectValue {  
+        param($ctx)  
+          
+        $obj = @{}  
+          
+        do {  
+            $type = $ctx.buffer[$ctx.position]  
+            $ctx.position++  
+              
+            # Handle empty objects/arrays  
+            if ($type -eq $VDF_SPECIAL.objectEnd) {  
+                break  
+            }  
+              
+            $propName = Read-StringValue $ctx  
+              
+            try {  
+                $val = $null  
+                switch ($type) {  
+                    $VDF_TYPES.object {  
+                        $val = Read-ObjectValue $ctx  
+                    }  
+                    $VDF_TYPES.string {  
+                        $val = Read-StringValue $ctx  
+                    }  
+                    $VDF_TYPES.int {  
+                        $val = Read-IntValue $ctx  
+                          
+                        # Apply date conversion  
+                        if ($ctx.options.dateProperties -contains $propName) {  
+                            $val = [DateTimeOffset]::FromUnixTimeSeconds($val).DateTime  
+                        }  
+                        # Apply boolean conversion  
+                        elseif ($ctx.options.autoConvertBooleans -and ($val -eq 1 -or $val -eq 0)) {  
+                            $val = [bool]$val  
+                        }  
+                    }  
+                }  
+                $obj[$propName] = $val  
+            }  
+            catch {  
+                throw "Error handling property: $propName - $_"  
+            }  
+              
+        } while ($ctx.position -lt $ctx.buffer.Length)  
+          
+        # Convert to array if all keys are numeric  
+        if ($ctx.options.autoConvertArrays) {  
+            $keys = $obj.Keys  
+            if ($keys.Count -gt 0 -and ($keys | ForEach-Object { Test-IsNumber $_ } | Where-Object { $_ -eq $false }).Count -eq 0) {  
+                $arr = New-Object object[] $keys.Count  
+                foreach ($key in $keys) {  
+                    $arr[[int]$key] = $obj[$key]  
+                }  
+                $obj = $arr  
+            }  
+        }  
+          
+        return $obj  
+    }  
+      
+    return Read-ObjectValue $context  
+}  
+  
+function Parse-VDFFile {  
+    param(  
+        [string]$FilePath,  
+        [hashtable]$Options = @{  
+            autoConvertBooleans = $true  
+            autoConvertArrays = $true  
+            dateProperties = @('LastPlayTime')  
+        }  
+    )  
+      
+    if (-not (Test-Path $FilePath)) {  
+        throw "File not found: $FilePath"  
+    }  
+      
+    $buffer = [System.IO.File]::ReadAllBytes($FilePath)  
+    return Parse-VDFBuffer -Buffer $buffer -Options $Options  
+}
 
-    $lines = $vdfContent -split "`r?`n"
-    $keysBuffer = [System.Collections.Generic.List[string]]::new()
-    $valuesBuffer = [System.Collections.Generic.List[PSObject]]::new()
-
-    foreach ($line in $lines) {
-        $trimmedLine = $line.Trim()
-
-        if ($trimmedLine -eq "{") {
-            if ($currentPSObject) {
-                $valuesBuffer.Add($currentPSObject)
-                $currentPSObject = [PSCustomObject]@{}
-            } else {
-                $currentPSObject = [PSCustomObject]@{}
-            }
-        } elseif ($trimmedLine -eq "}") {
-            if ($keysBuffer.Count -gt 0) {
-                $key = $keysBuffer[$keysBuffer.Count - 1]
-                $keysBuffer.RemoveAt($keysBuffer.Count - 1)
-            }
-
-            if ($valuesBuffer.Count -gt 0) {
-                $parentObject = $valuesBuffer[$valuesBuffer.Count - 1]
-                $valuesBuffer.RemoveAt($valuesBuffer.Count - 1)
-            } else {
-                $parentObject = [PSCustomObject]@{}
-            }
-
-            if ($null -eq $parentObject) {
-                $parentObject = [PSCustomObject]@{}
-            }
-            $parentObject | Add-Member -MemberType NoteProperty -Name $key -Value $currentPSObject
-            $currentPSObject = $parentObject
-        } else {
-            $stringMatches = [regex]::Matches($trimmedLine, '"([^"]*)"')
-            if ($stringMatches.Count -eq 1) {
-                $trimmedLine = $trimmedLine.Trim("`"")
-                $keysBuffer.Add($trimmedLine)
-            } elseif ($stringMatches.Count -eq 2) {
-                $currentPSObject | Add-Member -MemberType NoteProperty -Name $stringMatches[0].Groups[1].Value -Value $stringMatches[1].Groups[1].Value
-            }
-        }
+function Get-ShortcutsVdf {
+    $steamDirectory = Find-SteamDirectory
+    if (-not $steamDirectory) {
+        Write-Error "Steam directory not found."
+        return $null
     }
 
-    return $currentPSObject
+    $userdataPath = Join-Path $steamDirectory "userdata"
+    if (-not (Test-Path $userdataPath)) {
+        Write-Error "Steam userdata directory not found at $userdataPath"
+        return $null
+    }
+
+    $userDirs = Get-ChildItem -Path $userdataPath -Directory
+    if ($userDirs.Count -eq 0) {
+        Write-Error "No user directories found in $userdataPath"
+        return $null
+    } elseif ($userDirs.Count -gt 1) {
+        Write-Warning "Multiple user directories found. Using the first one: $($userDirs[0].Name)"
+    }
+
+    $userDir = $userDirs[0].FullName
+    $shortcutsVdfPath = Join-Path $userDir "config\shortcuts.vdf"
+
+    Write-Host "Resolved shortcuts.vdf path: $shortcutsVdfPath"
+
+    if (-not (Test-Path $shortcutsVdfPath)) {
+        Write-Error "shortcuts.vdf not found at $shortcutsVdfPath"
+        return $null
+    }
+
+    return Get-Content -Raw $shortcutsVdfPath
 }
 
 ### 1. setup log file
@@ -213,25 +313,36 @@ if ($Action -eq 'add-desktop-shortcut') {
     Stop-Transcript
     exit 0
 } elseif ($Action -eq 'add-steam-shortcut') {
-    $vdfContent = Get-LibraryFoldersVdf
-    if ($null -eq $vdfContent) {
-        Write-Host "Could not find Steam libraryfolders.vdf."
-    } else {
-        $vdfObj = ConvertTo-PSObject -vdfContent $vdfContent
-        # Steam's libraryfolders.vdf structure: libraryfolders > 0, 1, 2, ... > path
-        $libraries = @()
-        if ($vdfObj.libraryfolders) {
-            foreach ($key in $vdfObj.libraryfolders.PSObject.Properties.Name) {
-                $entry = $vdfObj.libraryfolders.$key
-                if ($entry -and $entry.path) {
-                    $libraries += $entry.path
-                }
+    # Print existing Steam shortcuts using Parse-VDFBuffer
+    $shortcutsVdfPath = $null
+    $steamDirectory = Find-SteamDirectory
+    if ($steamDirectory) {
+        $userdataPath = Join-Path $steamDirectory "userdata"
+        if (Test-Path $userdataPath) {
+            $userDirs = Get-ChildItem -Path $userdataPath -Directory
+            if ($userDirs.Count -gt 0) {
+                $userDir = $userDirs[0].FullName
+                $shortcutsVdfPath = Join-Path $userDir "config\shortcuts.vdf"
             }
         }
-        Write-Host "Current Steam library folders:"
-        foreach ($lib in $libraries) {
-            Write-Host "  $lib"
+    }
+    if ($shortcutsVdfPath -and (Test-Path $shortcutsVdfPath)) {
+        $buffer = [System.IO.File]::ReadAllBytes($shortcutsVdfPath)
+        $shortcutsObj = Parse-VDFBuffer -Buffer $buffer
+        # Print the parsed object in detail
+        if ($shortcutsObj.shortcuts) {
+            $i = 0
+            foreach ($shortcut in $shortcutsObj.shortcuts) {
+                Write-Host "Shortcut #$i"
+                $shortcut | Format-List -Force
+                Write-Host "----------------------"
+                $i++
+            }
+        } else {
+            Write-Host "No shortcuts found in shortcuts.vdf."
         }
+    } else {
+        Write-Host "Could not find shortcuts.vdf."
     }
     Stop-Transcript
     exit 0
