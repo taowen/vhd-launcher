@@ -447,7 +447,6 @@ if ($Action -eq 'add-desktop-shortcut') {
     Stop-Transcript
     exit 0
 } elseif ($Action -eq 'add-steam-shortcut') {
-    # 2. Find and backup shortcuts.vdf
     $steamInfo = Get-SteamShortcutsVdfPath
     if (-not $steamInfo) {
         Stop-Transcript
@@ -456,15 +455,21 @@ if ($Action -eq 'add-desktop-shortcut') {
     $steamDirectory = $steamInfo.SteamDirectory
     $userDir = $steamInfo.UserDir
     $shortcutsVdfPath = $steamInfo.ShortcutsVdfPath
-    
-    # Create backup with timestamp
-    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
-    $backupPath = $shortcutsVdfPath + "." + $timestamp + ".backup"
-    Copy-Item -Path $shortcutsVdfPath -Destination $backupPath -Force
-    Write-Host "Created backup of shortcuts.vdf at: $backupPath"
 
-    # 3. Read and parse existing shortcuts
-    $shortcuts = Parse-VDFFile -FilePath $shortcutsVdfPath
+    if (Test-Path $shortcutsVdfPath) {
+        $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+        $backupPath = $shortcutsVdfPath + "." + $timestamp + ".backup"
+        Copy-Item -Path $shortcutsVdfPath -Destination $backupPath -Force
+        Write-Host "Created backup of shortcuts.vdf at: $backupPath"
+    } else {
+        Write-Host "shortcuts.vdf not found, will create a new one."
+    }
+
+    if (Test-Path $shortcutsVdfPath) {
+        $shortcuts = Parse-VDFFile -FilePath $shortcutsVdfPath
+    } else {
+        $shortcuts = @{ shortcuts = @{} }
+    }
     if (-not $shortcuts.shortcuts) {
         $shortcuts = @{
             shortcuts = @{}
@@ -480,7 +485,6 @@ if ($Action -eq 'add-desktop-shortcut') {
         }
     }
 
-    # 4. Create new shortcut entry
     $gameName = [System.IO.Path]::GetFileNameWithoutExtension($VhdPath)
     $nextKey = 0
     if ($shortcuts.shortcuts.Keys.Count -gt 0) {
@@ -511,7 +515,6 @@ if ($Action -eq 'add-desktop-shortcut') {
         tags = @{}
     }
 
-    # 5. Add new shortcut and save
     $shortcuts.shortcuts["$nextKey"] = $newShortcut
     Write-VDFFile -FilePath $shortcutsVdfPath -Object $shortcuts
     Write-Host "Added Steam shortcut for: $gameName"
