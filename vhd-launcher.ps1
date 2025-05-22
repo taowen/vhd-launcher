@@ -46,6 +46,109 @@ function LaunchAndMonitor {
     }
 }
 
+function Get-LibraryFoldersVdf {
+    $location = "/config/libraryfolders.vdf"
+    $oldLocation = "/steamapps/libraryfolders.vdf"
+
+    $steamDirectory = Find-SteamDirectory
+
+    $locationExists = Test-Path -Path "$steamDirectory$location"
+    if ($locationExists) {
+        $result = Get-Content -Raw "$steamDirectory$location"
+    } else {
+        $locationExists = Test-Path -Path "$steamDirectory$oldLocation"
+        if ($locationExists) {
+            $result = Get-Content -Raw "$steamDirectory$oldLocation"
+        } else {
+            return $null
+        }
+    }
+
+    return $result
+}
+
+function Get-CurrentUserSteamRegistryKeyPath {
+    return @("HKCU:\Software\Valve\Steam", "SteamPath")
+}
+
+function Get-LocalMachineSteamRegistryKeyPath {
+    return @("HKLM:\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath")
+}
+
+function Find-SteamDirectory {
+    $steamRegistryPath = Get-CurrentUserSteamRegistryKeyPath
+    $path = $steamRegistryPath[0]
+    $key = $steamRegistryPath[1]
+
+    if ((Test-Path -Path "$path") -and ($null -ne (Get-ItemProperty -Path "$path" -Name "$key" -ErrorAction SilentlyContinue)))
+    {
+        return Get-ItemProperty -Path "$path" -Name "$key" | Select-Object -ExpandProperty "$key"
+    } else {
+        $steamRegistryPath = Get-LocalMachineSteamRegistryKeyPath
+        $path = $steamRegistryPath[0]
+        $key = $steamRegistryPath[1]
+
+        if ((Test-Path -Path "$path") -and ($null -ne (Get-ItemProperty -Path "$path" -Name "$key" -ErrorAction SilentlyContinue)))
+        {
+            return Get-ItemProperty -Path "$path" -Name "$key" | Select-Object -ExpandProperty "$key"
+        } else {
+            return $null
+        }
+    }
+}
+
+function ConvertTo-PSObject {
+    param (
+        [Parameter(Mandatory=$true)]
+        [string]$vdfContent
+    )
+
+    $lines = $vdfContent -split "`r?`n"
+    $keysBuffer = [System.Collections.Generic.List[string]]::new()
+    $valuesBuffer = [System.Collections.Generic.List[PSObject]]::new()
+
+    foreach ($line in $lines) {
+        $trimmedLine = $line.Trim()
+
+        if ($trimmedLine -eq "{") {
+            if ($currentPSObject) {
+                $valuesBuffer.Add($currentPSObject)
+                $currentPSObject = [PSCustomObject]@{}
+            } else {
+                $currentPSObject = [PSCustomObject]@{}
+            }
+        } elseif ($trimmedLine -eq "}") {
+            if ($keysBuffer.Count -gt 0) {
+                $key = $keysBuffer[$keysBuffer.Count - 1]
+                $keysBuffer.RemoveAt($keysBuffer.Count - 1)
+            }
+
+            if ($valuesBuffer.Count -gt 0) {
+                $parentObject = $valuesBuffer[$valuesBuffer.Count - 1]
+                $valuesBuffer.RemoveAt($valuesBuffer.Count - 1)
+            } else {
+                $parentObject = [PSCustomObject]@{}
+            }
+
+            if ($null -eq $parentObject) {
+                $parentObject = [PSCustomObject]@{}
+            }
+            $parentObject | Add-Member -MemberType NoteProperty -Name $key -Value $currentPSObject
+            $currentPSObject = $parentObject
+        } else {
+            $stringMatches = [regex]::Matches($trimmedLine, '"([^"]*)"')
+            if ($stringMatches.Count -eq 1) {
+                $trimmedLine = $trimmedLine.Trim("`"")
+                $keysBuffer.Add($trimmedLine)
+            } elseif ($stringMatches.Count -eq 2) {
+                $currentPSObject | Add-Member -MemberType NoteProperty -Name $stringMatches[0].Groups[1].Value -Value $stringMatches[1].Groups[1].Value
+            }
+        }
+    }
+
+    return $currentPSObject
+}
+
 ### 1. setup log file
 $currUser = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($currUser)
@@ -106,6 +209,29 @@ if ($Action -eq 'add-desktop-shortcut') {
             $DesktopShortcut.IconLocation = $IconPath
         }
         $DesktopShortcut.Save()
+    }
+    Stop-Transcript
+    exit 0
+} elseif ($Action -eq 'add-steam-shortcut') {
+    $vdfContent = Get-LibraryFoldersVdf
+    if ($null -eq $vdfContent) {
+        Write-Host "Could not find Steam libraryfolders.vdf."
+    } else {
+        $vdfObj = ConvertTo-PSObject -vdfContent $vdfContent
+        # Steam's libraryfolders.vdf structure: libraryfolders > 0, 1, 2, ... > path
+        $libraries = @()
+        if ($vdfObj.libraryfolders) {
+            foreach ($key in $vdfObj.libraryfolders.PSObject.Properties.Name) {
+                $entry = $vdfObj.libraryfolders.$key
+                if ($entry -and $entry.path) {
+                    $libraries += $entry.path
+                }
+            }
+        }
+        Write-Host "Current Steam library folders:"
+        foreach ($lib in $libraries) {
+            Write-Host "  $lib"
+        }
     }
     Stop-Transcript
     exit 0
