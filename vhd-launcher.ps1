@@ -92,20 +92,6 @@ Write-Host "The resolved vhd file path is: $VhdPath"
 ### 2.1. add desktop shortcut
 if ($Action -eq 'add-desktop-shortcut') {
     $WshShell = New-Object -ComObject WScript.Shell
-    $VhdDir = Split-Path -Path $VhdPath -Parent
-    $LnkPath = Join-Path -Path $VhdDir -ChildPath "start.lnk"
-    # If shortcut already exists, skip shortcut creation
-    if (Test-Path $LnkPath) {
-        Write-Host "Shortcut $LnkPath already exists, skipping shortcut creation."
-    } else {
-        $VhdFileName = [System.IO.Path]::GetFileName($VhdPath)
-        $Shortcut = $WshShell.CreateShortcut($LnkPath)
-        $Shortcut.TargetPath = "powershell.exe"
-        $Shortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File vhd-launcher.ps1 -VhdPath `"$VhdFileName`""
-        $Shortcut.Description = "Portable link"
-        $Shortcut.Save()
-    }
-
     $DesktopPath = [Environment]::GetFolderPath('Desktop')
     $DesktopLnkPath = $VhdPath -replace '\.vhd$', '.lnk'
     $DesktopLnkPath = Join-Path $DesktopPath ([System.IO.Path]::GetFileName($DesktopLnkPath))
