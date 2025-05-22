@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $false)]
     [string]$VhdPath,
     [Parameter(Mandatory = $false)]
-    [ValidateSet('launch', 'add-desktop-shortcut', 'add-steam-shortcut')]
+    [ValidateSet('launch', 'add-desktop-shortcut', 'add-steam-shortcut', 'print-steam-shortcuts')]
     [string]$Action = 'launch'
 )
 
@@ -107,7 +107,7 @@ function Parse-VDFBuffer {
     }  
       
     function Test-IsNumber {  
-        param([string]$str)  
+        param($str)  
         return $str -match '^\d+$'  
     }  
       
@@ -215,7 +215,143 @@ function Parse-VDFFile {
     return Parse-VDFBuffer -Buffer $buffer -Options $Options  
 }
 
-function Get-ShortcutsVdf {
+function Write-VDFBuffer {  
+    param(  
+        [object]$Object  
+    )  
+      
+    # VDF type constants  
+    $VDF_TYPES = @{  
+        object = 0x00  
+        string = 0x01  
+        int = 0x02  
+    }  
+      
+    $VDF_SPECIAL = @{  
+        objectEnd = 0x08  
+        stringEnd = 0x00  
+        propertyNameEnd = 0x00  
+    }  
+      
+    # Dynamic buffer management  
+    $buffer = @{  
+        data = [System.Collections.Generic.List[byte]]::new()  
+        allocSize = 256  
+    }  
+      
+    function Test-IsNumber {  
+        param($value)  
+        return ($value -is [int] -or $value -is [double] -or $value -is [float]) -and `
+               -not [double]::IsNaN($value) -and `
+               ([math]::Abs([double]$value) -ne [double]::Infinity)
+    }  
+      
+    function Write-Value {  
+        param($val, $buf)  
+          
+        # Pre-process values to align with writable values  
+        if ($null -eq $val) {  
+            $val = ''  
+        }  
+        elseif ($val -is [DateTime]) {  
+            # Convert dates to Unix timestamps  
+            $val = [int](($val - [DateTime]'1970-01-01').TotalSeconds)  
+        }  
+        elseif ($val -eq $true) {  
+            $val = 1  
+        }  
+        elseif ($val -eq $false) {  
+            $val = 0  
+        }  
+          
+        # Write values based on type  
+        if ($val -is [string]) {  
+            $bytes = [System.Text.Encoding]::UTF8.GetBytes($val)  
+            $buf.data.AddRange($bytes)  
+            $buf.data.Add($VDF_SPECIAL.stringEnd)  
+        }  
+        elseif (Test-IsNumber $val) {  
+            # Write 32-bit little-endian integer  
+            $bytes = [BitConverter]::GetBytes([int]$val)  
+            if (-not [BitConverter]::IsLittleEndian) {  
+                [Array]::Reverse($bytes)  
+            }  
+            $buf.data.AddRange($bytes)  
+        }  
+        elseif ($val -is [object]) {  
+            $keys = @()  
+              
+            if ($val -is [array]) {  
+                # Convert array to object with numeric keys  
+                $keys = 0..($val.Length - 1) | ForEach-Object { $_.ToString() }  
+            }  
+            else {  
+                # Get object keys  
+                if ($val -is [hashtable]) {  
+                    $keys = $val.Keys  
+                }  
+                else {  
+                    $keys = $val.PSObject.Properties.Name  
+                }  
+            }  
+              
+            foreach ($key in $keys) {  
+                $propValue = if ($val -is [array]) { $val[[int]$key] }   
+                            elseif ($val -is [hashtable]) { $val[$key] }  
+                            else { $val.$key }  
+                  
+                # Determine VDF type constant  
+                $constant = $null  
+                if ($null -eq $propValue -or $propValue -is [string]) {  
+                    $constant = $VDF_TYPES.string  
+                }  
+                elseif ($propValue -eq $true -or $propValue -eq $false -or   
+                        (Test-IsNumber $propValue) -or $propValue -is [DateTime]) {  
+                    $constant = $VDF_TYPES.int  
+                }  
+                elseif ($propValue -is [object]) {  
+                    $constant = $VDF_TYPES.object  
+                }  
+                else {  
+                    throw "Writer encountered unhandled value: $propValue"  
+                }  
+                  
+                # Write type constant  
+                $buf.data.Add($constant)  
+                  
+                # Write property name  
+                $keyBytes = [System.Text.Encoding]::UTF8.GetBytes($key)  
+                $buf.data.AddRange($keyBytes)  
+                $buf.data.Add($VDF_SPECIAL.propertyNameEnd)  
+                  
+                # Recursively write property value  
+                Write-Value $propValue $buf  
+            }  
+              
+            # Write object end marker  
+            $buf.data.Add($VDF_SPECIAL.objectEnd)  
+        }  
+        else {  
+            throw "Writer encountered unhandled value: $val"  
+        }  
+    }  
+      
+    Write-Value $Object $buffer  
+    return $buffer.data.ToArray()  
+}  
+  
+function Write-VDFFile {  
+    param(  
+        [string]$FilePath,  
+        [object]$Object  
+    )  
+      
+    $buffer = Write-VDFBuffer -Object $Object  
+    [System.IO.File]::WriteAllBytes($FilePath, $buffer)  
+}
+
+function Get-SteamShortcutsVdfPath {
+    # Returns a hashtable with SteamDirectory, UserDir, ShortcutsVdfPath
     $steamDirectory = Find-SteamDirectory
     if (-not $steamDirectory) {
         Write-Error "Steam directory not found."
@@ -239,14 +375,11 @@ function Get-ShortcutsVdf {
     $userDir = $userDirs[0].FullName
     $shortcutsVdfPath = Join-Path $userDir "config\shortcuts.vdf"
 
-    Write-Host "Resolved shortcuts.vdf path: $shortcutsVdfPath"
-
-    if (-not (Test-Path $shortcutsVdfPath)) {
-        Write-Error "shortcuts.vdf not found at $shortcutsVdfPath"
-        return $null
+    return @{ 
+        SteamDirectory = $steamDirectory
+        UserDir = $userDir
+        ShortcutsVdfPath = $shortcutsVdfPath
     }
-
-    return Get-Content -Raw $shortcutsVdfPath
 }
 
 ### 1. setup log file
@@ -292,6 +425,8 @@ if (-not (Test-Path $VhdPath)) {
 
 Write-Host "The resolved vhd file path is: $VhdPath"
 
+$VhdDir = Split-Path -Path $VhdPath -Parent
+
 ### 2.1. add desktop shortcut
 if ($Action -eq 'add-desktop-shortcut') {
     $WshShell = New-Object -ComObject WScript.Shell
@@ -305,44 +440,120 @@ if ($Action -eq 'add-desktop-shortcut') {
         $DesktopShortcut = $WshShell.CreateShortcut($DesktopLnkPath)
         $DesktopShortcut.TargetPath = "powershell.exe"
         $DesktopShortcut.Arguments = "-NoProfile -ExecutionPolicy Bypass -File `"$PSCommandPath`" -VhdPath `"$VhdPath`""
-        if (Test-Path $IconPath) {
-            $DesktopShortcut.IconLocation = $IconPath
-        }
+        if ($IconPath -and (Test-Path $IconPath)) { $iconPath = $IconPath }
+        $DesktopShortcut.IconLocation = $iconPath
         $DesktopShortcut.Save()
     }
     Stop-Transcript
     exit 0
 } elseif ($Action -eq 'add-steam-shortcut') {
-    # Print existing Steam shortcuts using Parse-VDFBuffer
-    $shortcutsVdfPath = $null
-    $steamDirectory = Find-SteamDirectory
-    if ($steamDirectory) {
-        $userdataPath = Join-Path $steamDirectory "userdata"
-        if (Test-Path $userdataPath) {
-            $userDirs = Get-ChildItem -Path $userdataPath -Directory
-            if ($userDirs.Count -gt 0) {
-                $userDir = $userDirs[0].FullName
-                $shortcutsVdfPath = Join-Path $userDir "config\shortcuts.vdf"
-            }
+    # 2. Find and backup shortcuts.vdf
+    $steamInfo = Get-SteamShortcutsVdfPath
+    if (-not $steamInfo) {
+        Stop-Transcript
+        exit 1
+    }
+    $steamDirectory = $steamInfo.SteamDirectory
+    $userDir = $steamInfo.UserDir
+    $shortcutsVdfPath = $steamInfo.ShortcutsVdfPath
+    
+    # Create backup with timestamp
+    $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
+    $backupPath = $shortcutsVdfPath + "." + $timestamp + ".backup"
+    Copy-Item -Path $shortcutsVdfPath -Destination $backupPath -Force
+    Write-Host "Created backup of shortcuts.vdf at: $backupPath"
+
+    # 3. Read and parse existing shortcuts
+    $shortcuts = Parse-VDFFile -FilePath $shortcutsVdfPath
+    if (-not $shortcuts.shortcuts) {
+        $shortcuts = @{
+            shortcuts = @{}
         }
     }
-    if ($shortcutsVdfPath -and (Test-Path $shortcutsVdfPath)) {
-        $buffer = [System.IO.File]::ReadAllBytes($shortcutsVdfPath)
-        $shortcutsObj = Parse-VDFBuffer -Buffer $buffer
-        # Print the parsed object in detail
-        if ($shortcutsObj.shortcuts) {
-            $i = 0
-            foreach ($shortcut in $shortcutsObj.shortcuts) {
-                Write-Host "Shortcut #$i"
-                $shortcut | Format-List -Force
-                Write-Host "----------------------"
-                $i++
-            }
-        } else {
-            Write-Host "No shortcuts found in shortcuts.vdf."
+
+    # If shortcuts.shortcuts is not a hashtable, convert it
+    if ($shortcuts.shortcuts -isnot [hashtable]) {
+        $originalShortcut = $shortcuts.shortcuts
+        $shortcuts.shortcuts = @{}
+        if ($originalShortcut) {
+            $shortcuts.shortcuts["0"] = $originalShortcut
         }
-    } else {
-        Write-Host "Could not find shortcuts.vdf."
+    }
+
+    # 4. Create new shortcut entry
+    $gameName = [System.IO.Path]::GetFileNameWithoutExtension($VhdPath)
+    $nextKey = 0
+    if ($shortcuts.shortcuts.Keys.Count -gt 0) {
+        $numericKeys = $shortcuts.shortcuts.Keys | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ }
+        if ($numericKeys.Count -gt 0) {
+            $nextKey = ($numericKeys | Measure-Object -Maximum).Maximum + 1
+        }
+    }
+
+    $IconPath = $VhdPath -replace '\.vhd$', '.ico'
+    $newShortcut = @{
+        AppName = $gameName
+        Exe = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+        StartDir = $VhdDir
+        icon = if ($IconPath -and (Test-Path $IconPath)) { $IconPath } else { "" }
+        ShortcutPath = ""
+        LaunchOptions = "-NoProfile -ExecutionPolicy Bypass -File $PSCommandPath -VhdPath $VhdPath"
+        IsHidden = $false
+        AllowDesktopConfig = $true
+        OpenVR = $false
+        Devkit = $false
+        DevkitGameID = ""
+        DevkitOverrideAppID = $false
+        AllowOverlay = $true
+        FlatpakAppID = ""
+        appid = 0
+        LastPlayTime = "/Date($([int]([DateTimeOffset]::Now.ToUnixTimeSeconds())))/"
+        tags = @{}
+    }
+
+    # 5. Add new shortcut and save
+    $shortcuts.shortcuts["$nextKey"] = $newShortcut
+    Write-VDFFile -FilePath $shortcutsVdfPath -Object $shortcuts
+    Write-Host "Added Steam shortcut for: $gameName"
+    
+    Stop-Transcript
+    exit 0
+} elseif ($Action -eq 'print-steam-shortcuts') {
+    $steamInfo = Get-SteamShortcutsVdfPath
+    if (-not $steamInfo) {
+        Stop-Transcript
+        exit 1
+    }
+    $steamDirectory = $steamInfo.SteamDirectory
+    $userDir = $steamInfo.UserDir
+    $shortcutsVdfPath = $steamInfo.ShortcutsVdfPath
+
+    if (-not (Test-Path $shortcutsVdfPath)) {
+        Write-Error "shortcuts.vdf not found at $shortcutsVdfPath"
+        Stop-Transcript
+        exit 1
+    }
+
+    $shortcuts = Parse-VDFFile -FilePath $shortcutsVdfPath
+    if (-not $shortcuts.shortcuts) {
+        Write-Host "No shortcuts found in $shortcutsVdfPath"
+        Stop-Transcript
+        exit 0
+    }
+
+    Write-Host "Steam Shortcuts in ${shortcutsVdfPath}:"
+    $shortcutList = $shortcuts.shortcuts
+    if ($shortcutList -isnot [hashtable]) {
+        $shortcutList = @{"0" = $shortcutList}
+    }
+    foreach ($key in $shortcutList.Keys | Sort-Object {[int]$_}) {
+        $sc = $shortcutList[$key]
+        Write-Host "[$key] $($sc.AppName)"
+        Write-Host "    Exe: $($sc.Exe)"
+        Write-Host "    LaunchOptions: $($sc.LaunchOptions)"
+        Write-Host "    StartDir: $($sc.StartDir)"
+        Write-Host "    Icon: $($sc.icon)"
+        Write-Host ""
     }
     Stop-Transcript
     exit 0
@@ -479,7 +690,6 @@ if ($partition) {
 ### 8. link patch files
 
 # Determine patch folder path (next to VHD)
-$VhdDir = Split-Path -Path $VhdPath -Parent
 $PatchDir = Join-Path $VhdDir 'patch'
 
 if (Test-Path $PatchDir) {
