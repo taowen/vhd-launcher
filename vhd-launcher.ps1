@@ -427,7 +427,43 @@ Write-Host "The resolved vhd file path is: $VhdPath"
 
 $VhdDir = Split-Path -Path $VhdPath -Parent
 
-### 2.1. add desktop shortcut
+### 3. read configuration
+$IniPath = $VhdPath -replace '\.vhd$', '.ini'
+$iniContent = Get-Content $IniPath | Where-Object { $_ -match '=' }
+
+# create a hash table to store key-value
+$ini = @{}
+foreach ($line in $iniContent) {
+    $parts = $line -split '=', 2
+    if ($parts.Count -eq 2) {
+        $key = $parts[0].Trim()
+        $value = $parts[1].Trim()
+        $ini[$key] = $value
+    }
+}
+
+$readonly = $ini['readonly']
+$launchDriveLetter = $ini['launchDriveLetter']
+$launchExe = $ini['launchExe']
+
+if (-not ([System.IO.Path]::IsPathRooted($targetSaveDir))) {
+    $targetSaveDir = Join-Path -Path (Split-Path -Path $VhdPath -Parent) -ChildPath $targetSaveDir
+}
+
+if ($launchDriveLetter -eq 'C' -or $launchDriveLetter -eq 'c') {
+    Write-Error "Error: launchDriveLetter cannot be C or c. Aborting."
+    exit 1
+}
+
+$launchPath = "${launchDriveLetter}:\$launchExe"
+
+Write-Host "readonly: $readonly"
+Write-Host "launchDriveLetter: $launchDriveLetter"
+Write-Host "launchExe: $launchExe"
+Write-Host "launchPath: $launchPath"
+
+### 3.x other actions
+
 if ($Action -eq 'add-desktop-shortcut') {
     $WshShell = New-Object -ComObject WScript.Shell
     $DesktopPath = [Environment]::GetFolderPath('Desktop')
@@ -547,41 +583,6 @@ if ($Action -eq 'add-desktop-shortcut') {
     Stop-Transcript
     exit 0
 }
-
-### 3. read configuration
-$IniPath = $VhdPath -replace '\.vhd$', '.ini'
-$iniContent = Get-Content $IniPath | Where-Object { $_ -match '=' }
-
-# create a hash table to store key-value
-$ini = @{}
-foreach ($line in $iniContent) {
-    $parts = $line -split '=', 2
-    if ($parts.Count -eq 2) {
-        $key = $parts[0].Trim()
-        $value = $parts[1].Trim()
-        $ini[$key] = $value
-    }
-}
-
-$readonly = $ini['readonly']
-$launchDriveLetter = $ini['launchDriveLetter']
-$launchExe = $ini['launchExe']
-
-if (-not ([System.IO.Path]::IsPathRooted($targetSaveDir))) {
-    $targetSaveDir = Join-Path -Path (Split-Path -Path $VhdPath -Parent) -ChildPath $targetSaveDir
-}
-
-if ($launchDriveLetter -eq 'C' -or $launchDriveLetter -eq 'c') {
-    Write-Error "Error: launchDriveLetter cannot be C or c. Aborting."
-    exit 1
-}
-
-$launchPath = "${launchDriveLetter}:\$launchExe"
-
-Write-Host "readonly: $readonly"
-Write-Host "launchDriveLetter: $launchDriveLetter"
-Write-Host "launchExe: $launchExe"
-Write-Host "launchPath: $launchPath"
 
 ### 4. if already mounted, launch the exe directly
 if (Test-Path $launchPath) {
