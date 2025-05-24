@@ -547,18 +547,28 @@ if ($Action -eq 'add-desktop-shortcut') {
         tags = @{}
     }
 
-    # 追加新快捷方式
-    # Find the next available key number for the shortcuts dictionary
-    $nextKey = 0
-    if ($shortcuts.shortcuts.Keys.Count -gt 0) {
-        # Get the highest existing key number and add 1
-        $existingKeys = [int[]]$shortcuts.shortcuts.Keys | Sort-Object
-        $nextKey = $existingKeys[-1] + 1
+    # 覆盖已有相同 appName 的 shortcut，否则追加
+    $foundKey = $null
+    foreach ($key in $shortcuts.shortcuts.Keys) {
+        if ($shortcuts.shortcuts[$key].appname -eq $appName) {
+            $foundKey = $key
+            break
+        }
     }
-
-    $shortcuts.shortcuts["$nextKey"] = $newShortcut
+    if ($null -ne $foundKey) {
+        $shortcuts.shortcuts[$foundKey] = $newShortcut
+        Write-Host "Replaced existing Steam shortcut for: $appName"
+    } else {
+        # Find the next available key number for the shortcuts dictionary
+        $nextKey = 0
+        if ($shortcuts.shortcuts.Keys.Count -gt 0) {
+            $existingKeys = [int[]]$shortcuts.shortcuts.Keys | Sort-Object
+            $nextKey = $existingKeys[-1] + 1
+        }
+        $shortcuts.shortcuts["$nextKey"] = $newShortcut
+        Write-Host "Added new Steam shortcut for: $appName"
+    }
     Write-VDFFile -FilePath $shortcutsVdfPath -Object $shortcuts
-    Write-Host "Added Steam shortcut for: $appName"
     Stop-Transcript
     exit 0
 } elseif ($Action -eq 'print-steam-shortcuts') {
