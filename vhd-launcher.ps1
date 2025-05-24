@@ -393,6 +393,76 @@ function Get-SteamShortcutId {
     return [int]$appid  # 保证类型为 System.Int32
 }
 
+function Get-SteamArtworkPrefix {
+    param([int]$appid)
+    $appid_u32 = if ($appid -lt 0) { $appid + 0x100000000 } else { $appid }
+    $prefix = (($appid_u32 -bor 0x80000000) -shl 32) -bor 0x02000000
+    $prefix = $prefix -shr 32
+    if ($prefix -lt 0) { $prefix = $prefix + 0x100000000 }
+    return "$prefix"
+}
+
+function Get-SteamArtworkDir {
+    $steamDir = Find-SteamDirectory
+    if (-not $steamDir) { throw "Steam directory not found." }
+    $artworkDir = Join-Path $steamDir "userdata"
+    $userDirs = Get-ChildItem -Path $artworkDir -Directory
+    if ($userDirs.Count -eq 0) { throw "No user found in Steam userdata." }
+    $userDir = $userDirs[0].FullName
+    return Join-Path $userDir "config\grid"
+}
+function Copy-SteamArtworkImages {
+    param(
+        [string]$VhdDir,
+        [int]$appid
+    )
+    $prefix = Get-SteamArtworkPrefix $appid
+    $steamArtworkDir = Get-SteamArtworkDir
+    if (-not (Test-Path $steamArtworkDir)) {
+        New-Item -ItemType Directory -Path $steamArtworkDir | Out-Null
+    }
+
+    # hero
+    $heroFiles = Get-ChildItem -Path $VhdDir -Filter "hero.*" -File
+    foreach ($file in $heroFiles) {
+        $ext = $file.Extension
+        $outfilename = "${prefix}_hero$ext"
+        $destPath = Join-Path $steamArtworkDir $outfilename
+        Copy-Item -Path $file.FullName -Destination $destPath -Force
+        Write-Host "Copied $($file.Name) to $destPath"
+    }
+
+    # logo
+    $logoFiles = Get-ChildItem -Path $VhdDir -Filter "logo.*" -File
+    foreach ($file in $logoFiles) {
+        $ext = $file.Extension
+        $outfilename = "${prefix}_logo$ext"
+        $destPath = Join-Path $steamArtworkDir $outfilename
+        Copy-Item -Path $file.FullName -Destination $destPath -Force
+        Write-Host "Copied $($file.Name) to $destPath"
+    }
+
+    # grid-vertical (portrait)
+    $gridVFiles = Get-ChildItem -Path $VhdDir -Filter "grid-vertical.*" -File
+    foreach ($file in $gridVFiles) {
+        $ext = $file.Extension
+        $outfilename = "${prefix}p$ext"
+        $destPath = Join-Path $steamArtworkDir $outfilename
+        Copy-Item -Path $file.FullName -Destination $destPath -Force
+        Write-Host "Copied $($file.Name) to $destPath"
+    }
+
+    # grid-horizontal (landscape)
+    $gridHFiles = Get-ChildItem -Path $VhdDir -Filter "grid-horizontal.*" -File
+    foreach ($file in $gridHFiles) {
+        $ext = $file.Extension
+        $outfilename = "${prefix}$ext"
+        $destPath = Join-Path $steamArtworkDir $outfilename
+        Copy-Item -Path $file.FullName -Destination $destPath -Force
+        Write-Host "Copied $($file.Name) to $destPath"
+    }
+}
+
 ### 1. setup log file
 $currUser = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($currUser)
@@ -569,6 +639,9 @@ if ($Action -eq 'add-desktop-shortcut') {
         Write-Host "Added new Steam shortcut for: $appName"
     }
     Write-VDFFile -FilePath $shortcutsVdfPath -Object $shortcuts
+    
+    Copy-SteamArtworkImages -VhdDir $VhdDir -appid $appid
+
     Stop-Transcript
     exit 0
 } elseif ($Action -eq 'print-steam-shortcuts') {
