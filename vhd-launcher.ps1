@@ -445,6 +445,7 @@ foreach ($line in $iniContent) {
 $readonly = $ini['readonly']
 $launchDriveLetter = $ini['launchDriveLetter']
 $launchExe = $ini['launchExe']
+$name = $ini['name']
 
 if (-not ([System.IO.Path]::IsPathRooted($targetSaveDir))) {
     $targetSaveDir = Join-Path -Path (Split-Path -Path $VhdPath -Parent) -ChildPath $targetSaveDir
@@ -467,8 +468,12 @@ Write-Host "launchPath: $launchPath"
 if ($Action -eq 'add-desktop-shortcut') {
     $WshShell = New-Object -ComObject WScript.Shell
     $DesktopPath = [Environment]::GetFolderPath('Desktop')
-    $DesktopLnkPath = $VhdPath -replace '\.vhd$', '.lnk'
-    $DesktopLnkPath = Join-Path $DesktopPath ([System.IO.Path]::GetFileName($DesktopLnkPath))
+    if ($name -and $name.Trim() -ne "") {
+        $shortcutFileName = "$name.lnk"
+    } else {
+        $shortcutFileName = [System.IO.Path]::GetFileName($VhdPath) -replace '\.vhd$', '.lnk'
+    }
+    $DesktopLnkPath = Join-Path $DesktopPath $shortcutFileName
     if (Test-Path $DesktopLnkPath) {
         Write-Host "Shortcut $DesktopLnkPath already exists, skipping shortcut creation."
     } else {
@@ -480,6 +485,7 @@ if ($Action -eq 'add-desktop-shortcut') {
         $DesktopShortcut.IconLocation = $iconPath
         $DesktopShortcut.Save()
     }
+    Write-Host "Action 'add-desktop-shortcut' completed."
     Stop-Transcript
     exit 0
 } elseif ($Action -eq 'add-steam-shortcut') {
@@ -554,7 +560,7 @@ if ($Action -eq 'add-desktop-shortcut') {
     $shortcuts.shortcuts["$nextKey"] = $newShortcut
     Write-VDFFile -FilePath $shortcutsVdfPath -Object $shortcuts
     Write-Host "Added Steam shortcut for: $gameName"
-    
+    Write-Host "Action 'add-steam-shortcut' completed."
     Stop-Transcript
     exit 0
 } elseif ($Action -eq 'print-steam-shortcuts') {
@@ -580,6 +586,7 @@ if ($Action -eq 'add-desktop-shortcut') {
         exit 0
     }
     $shortcuts | ConvertTo-Json -Depth 10
+    Write-Host "Action 'print-steam-shortcuts' completed."
     Stop-Transcript
     exit 0
 }
