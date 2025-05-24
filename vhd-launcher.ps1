@@ -445,7 +445,11 @@ foreach ($line in $iniContent) {
 $readonly = $ini['readonly']
 $launchDriveLetter = $ini['launchDriveLetter']
 $launchExe = $ini['launchExe']
-$name = $ini['name']
+$appName = if ($ini['appName']) {
+    $ini['appName']
+} else {
+    [System.IO.Path]::GetFileNameWithoutExtension($VhdPath)
+}
 
 if (-not ([System.IO.Path]::IsPathRooted($targetSaveDir))) {
     $targetSaveDir = Join-Path -Path (Split-Path -Path $VhdPath -Parent) -ChildPath $targetSaveDir
@@ -468,11 +472,7 @@ Write-Host "launchPath: $launchPath"
 if ($Action -eq 'add-desktop-shortcut') {
     $WshShell = New-Object -ComObject WScript.Shell
     $DesktopPath = [Environment]::GetFolderPath('Desktop')
-    if ($name -and $name.Trim() -ne "") {
-        $shortcutFileName = "$name.lnk"
-    } else {
-        $shortcutFileName = [System.IO.Path]::GetFileName($VhdPath) -replace '\.vhd$', '.lnk'
-    }
+    $shortcutFileName = "$appName.lnk"
     $DesktopLnkPath = Join-Path $DesktopPath $shortcutFileName
     if (Test-Path $DesktopLnkPath) {
         Write-Host "Shortcut $DesktopLnkPath already exists, skipping shortcut creation."
@@ -527,7 +527,6 @@ if ($Action -eq 'add-desktop-shortcut') {
         }
     }
 
-    $gameName = [System.IO.Path]::GetFileNameWithoutExtension($VhdPath)
     $nextKey = 0
     if ($shortcuts.shortcuts.Keys.Count -gt 0) {
         $numericKeys = $shortcuts.shortcuts.Keys | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ }
@@ -538,7 +537,8 @@ if ($Action -eq 'add-desktop-shortcut') {
 
     $IconPath = $VhdPath -replace '\.vhd$', '.ico'
     $newShortcut = @{
-        AppName = $gameName
+        appid = 1024
+        appname = $appName
         Exe = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
         StartDir = $VhdDir
         icon = if ($IconPath -and (Test-Path $IconPath)) { $IconPath } else { "" }
@@ -552,15 +552,13 @@ if ($Action -eq 'add-desktop-shortcut') {
         DevkitOverrideAppID = $false
         AllowOverlay = $true
         FlatpakAppID = ""
-        appid = 0
         LastPlayTime = "/Date($([int]([DateTimeOffset]::Now.ToUnixTimeSeconds())))/"
         tags = @{}
     }
 
     $shortcuts.shortcuts["$nextKey"] = $newShortcut
     Write-VDFFile -FilePath $shortcutsVdfPath -Object $shortcuts
-    Write-Host "Added Steam shortcut for: $gameName"
-    Write-Host "Action 'add-steam-shortcut' completed."
+    Write-Host "Added Steam shortcut for: $appName"
     Stop-Transcript
     exit 0
 } elseif ($Action -eq 'print-steam-shortcuts') {
@@ -578,6 +576,7 @@ if ($Action -eq 'add-desktop-shortcut') {
         Stop-Transcript
         exit 1
     }
+    Write-Host "shortcuts.vdf found at $shortcutsVdfPath"
 
     $shortcuts = Parse-VDFFile -FilePath $shortcutsVdfPath
     if (-not $shortcuts.shortcuts) {
