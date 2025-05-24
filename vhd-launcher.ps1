@@ -723,7 +723,7 @@ Write-Host "launchPath: $launchPath"
 if ($Action -eq 'add-desktop-shortcut') {
     $WshShell = New-Object -ComObject WScript.Shell
     $DesktopPath = [Environment]::GetFolderPath('Desktop')
-    $shortcutFileName = "$appName.lnk"
+    $shortcutFileName = ($appName -replace '[:*?"<>|/\\]', '') + ".lnk"
     $DesktopLnkPath = Join-Path $DesktopPath $shortcutFileName
     if (Test-Path $DesktopLnkPath) {
         Write-Host "Shortcut $DesktopLnkPath already exists, skipping shortcut creation."
