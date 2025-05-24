@@ -463,6 +463,112 @@ function Copy-SteamArtworkImages {
     }
 }
 
+function Get-SteamGridId {
+    param(
+        [string]$AppName
+    )
+    $url = "https://nonsteamlaunchers.onrender.com/api/search/$([uri]::EscapeDataString($AppName))"
+    try {
+        $response = Invoke-RestMethod -Uri $url -Method Get -ErrorAction Stop
+        if ($response -and $response.data -and $response.data.Count -gt 0) {
+            # 返回第一个结果的 id
+            return $response.data[0].id
+        } else {
+            Write-Host "No results found for $AppName"
+            return $null
+        }
+    } catch {
+        Write-Host "Failed to fetch steamGridId for $AppName\: $_"
+        return $null
+    }
+}
+
+function Get-SteamGridArtwork {
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('heroes', 'logos', 'grids')]
+        [string]$Type,
+        [Parameter(Mandatory = $true)]
+        [int]$SteamGridId
+    )
+    $url = "https://nonsteamlaunchers.onrender.com/api/$Type/games/$SteamGridId"
+    try {
+        $response = Invoke-RestMethod -Uri $url -Method Get -ErrorAction Stop
+        return $response
+    } catch {
+        Write-Host "Failed to fetch $Type for SteamGridId $SteamGridId\: $_"
+        return $null
+    }
+}
+
+function Download-SteamGridVertical {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$SteamGridId,
+        [Parameter(Mandatory = $true)]
+        [int]$AppId,
+        [string]$OutputDir
+    )
+    $artworks = Get-SteamGridArtwork -Type 'grids' -SteamGridId $SteamGridId
+    if (-not $artworks -or -not $artworks.data) {
+        Write-Host "No grid artworks found for $SteamGridId"
+        return $null
+    }
+    $vertical = $artworks.data | Where-Object { $_.width -eq 600 -and $_.height -eq 900 }
+    if (-not $vertical) {
+        Write-Host "No 600x900 grid artwork found."
+        return $null
+    }
+    $url = $vertical[0].thumb
+    $ext = [System.IO.Path]::GetExtension($url)
+    if (-not $OutputDir) {
+        $OutputDir = (Get-SteamArtworkDir)
+    }
+    if (-not (Test-Path $OutputDir)) {
+        New-Item -ItemType Directory -Path $OutputDir | Out-Null
+    }
+    $prefix = Get-SteamArtworkPrefix $AppId
+    $filename = "${prefix}p$ext"
+    $filepath = Join-Path $OutputDir $filename
+    Invoke-WebRequest -Uri $url -OutFile $filepath -UseBasicParsing
+    Write-Host "Downloaded grid-vertical to $filepath"
+    return $filepath
+}
+
+function Download-SteamGridHorizontal {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$SteamGridId,
+        [Parameter(Mandatory = $true)]
+        [int]$AppId,
+        [string]$OutputDir
+    )
+    $artworks = Get-SteamGridArtwork -Type 'grids' -SteamGridId $SteamGridId
+    if (-not $artworks -or -not $artworks.data) {
+        Write-Host "No grid artworks found for $SteamGridId"
+        return $null
+    }
+    $horizontal = $artworks.data | Where-Object { $_.width -eq 920 -and $_.height -eq 430 }
+    if (-not $horizontal) {
+        Write-Host "No 920x430 grid artwork found."
+        return $null
+    }
+    $url = $horizontal[0].thumb
+    $ext = [System.IO.Path]::GetExtension($url)
+    if (-not $OutputDir) {
+        $OutputDir = (Get-SteamArtworkDir)
+    }
+    if (-not (Test-Path $OutputDir)) {
+        New-Item -ItemType Directory -Path $OutputDir | Out-Null
+    }
+    $prefix = Get-SteamArtworkPrefix $AppId
+    $filename = "${prefix}$ext"
+    $filepath = Join-Path $OutputDir $filename
+    Invoke-WebRequest -Uri $url -OutFile $filepath -UseBasicParsing
+    Write-Host "Downloaded grid-horizontal to $filepath"
+    return $filepath
+}
+
 ### 1. setup log file
 $currUser = [Security.Principal.WindowsIdentity]::GetCurrent()
 $principal = New-Object Security.Principal.WindowsPrincipal($currUser)
