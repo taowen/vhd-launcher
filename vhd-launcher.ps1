@@ -543,21 +543,7 @@ if ($Action -eq 'add-desktop-shortcut') {
         Stop-Transcript
         exit 0
     }
-
-    Write-Host "Steam Shortcuts in ${shortcutsVdfPath}:"
-    $shortcutList = $shortcuts.shortcuts
-    if ($shortcutList -isnot [hashtable]) {
-        $shortcutList = @{"0" = $shortcutList}
-    }
-    foreach ($key in $shortcutList.Keys | Sort-Object {[int]$_}) {
-        $sc = $shortcutList[$key]
-        Write-Host "[$key] $($sc.AppName)"
-        Write-Host "    Exe: $($sc.Exe)"
-        Write-Host "    LaunchOptions: $($sc.LaunchOptions)"
-        Write-Host "    StartDir: $($sc.StartDir)"
-        Write-Host "    Icon: $($sc.icon)"
-        Write-Host ""
-    }
+    $shortcuts | ConvertTo-Json -Depth 10
     Stop-Transcript
     exit 0
 }
