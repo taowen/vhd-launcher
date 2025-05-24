@@ -6,6 +6,15 @@ param(
     [string]$Action = 'launch'
 )
 
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class Crc32Native {
+    [DllImport("ntdll.dll")]
+    public static extern uint RtlComputeCrc32(uint dwInitial, byte[] pData, int iLen);
+}
+"@
+
 function LaunchAndMonitor {
     param(
         [string]$LaunchPath,
@@ -179,18 +188,6 @@ function Parse-VDFBuffer {
               
         } while ($ctx.position -lt $ctx.buffer.Length)  
           
-        # Convert to array if all keys are numeric  
-        if ($ctx.options.autoConvertArrays) {  
-            $keys = $obj.Keys  
-            if ($keys.Count -gt 0 -and ($keys | ForEach-Object { Test-IsNumber $_ } | Where-Object { $_ -eq $false }).Count -eq 0) {  
-                $arr = New-Object object[] $keys.Count  
-                foreach ($key in $keys) {  
-                    $arr[[int]$key] = $obj[$key]  
-                }  
-                $obj = $arr  
-            }  
-        }  
-          
         return $obj  
     }  
       
@@ -279,25 +276,19 @@ function Write-VDFBuffer {
             $buf.data.AddRange($bytes)  
         }  
         elseif ($val -is [object]) {  
-            $keys = @()  
-              
-            if ($val -is [array]) {  
-                # Convert array to object with numeric keys  
-                $keys = 0..($val.Length - 1) | ForEach-Object { $_.ToString() }  
+            # 不支持 array
+            if ($val -is [array]) {
+                throw "Writer does not support array type in VDF."
+            }
+            $keys = @()
+            if ($val -is [hashtable]) {  
+                $keys = $val.Keys  
             }  
             else {  
-                # Get object keys  
-                if ($val -is [hashtable]) {  
-                    $keys = $val.Keys  
-                }  
-                else {  
-                    $keys = $val.PSObject.Properties.Name  
-                }  
+                $keys = $val.PSObject.Properties.Name  
             }  
-              
             foreach ($key in $keys) {  
-                $propValue = if ($val -is [array]) { $val[[int]$key] }   
-                            elseif ($val -is [hashtable]) { $val[$key] }  
+                $propValue = if ($val -is [hashtable]) { $val[$key] }  
                             else { $val.$key }  
                   
                 # Determine VDF type constant  
@@ -380,6 +371,26 @@ function Get-SteamShortcutsVdfPath {
         UserDir = $userDir
         ShortcutsVdfPath = $shortcutsVdfPath
     }
+}
+
+function Get-Crc32 {
+    param([string]$InputString)
+    $arr = [System.Text.Encoding]::UTF8.GetBytes($InputString)
+    return [Crc32Native]::RtlComputeCrc32(0, $arr, $arr.Length)
+}
+
+function Get-SteamShortcutId {
+    param(
+        [string]$ExePath,
+        [string]$AppName
+    )
+    $unique = "$ExePath$AppName"
+    $crc32 = Get-Crc32 $unique
+    $appid = $crc32 -bor 0x80000000
+    if ($appid -gt [int]::MaxValue) {
+        $appid = $appid - 0x100000000  # 2^32
+    }
+    return [int]$appid  # 保证类型为 System.Int32
 }
 
 ### 1. setup log file
@@ -512,34 +523,14 @@ if ($Action -eq 'add-desktop-shortcut') {
     } else {
         $shortcuts = @{ shortcuts = @{} }
     }
-    if (-not $shortcuts.shortcuts) {
-        $shortcuts = @{
-            shortcuts = @{}
-        }
-    }
-
-    # If shortcuts.shortcuts is not a hashtable, convert it
-    if ($shortcuts.shortcuts -isnot [hashtable]) {
-        $originalShortcut = $shortcuts.shortcuts
-        $shortcuts.shortcuts = @{}
-        if ($originalShortcut) {
-            $shortcuts.shortcuts["0"] = $originalShortcut
-        }
-    }
-
-    $nextKey = 0
-    if ($shortcuts.shortcuts.Keys.Count -gt 0) {
-        $numericKeys = $shortcuts.shortcuts.Keys | Where-Object { $_ -match '^\d+$' } | ForEach-Object { [int]$_ }
-        if ($numericKeys.Count -gt 0) {
-            $nextKey = ($numericKeys | Measure-Object -Maximum).Maximum + 1
-        }
-    }
 
     $IconPath = $VhdPath -replace '\.vhd$', '.ico'
+    $exePath = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $appid = Get-SteamShortcutId -ExePath $exePath -AppName $appName
     $newShortcut = @{
-        appid = 1024
+        appid = $appid
         appname = $appName
-        Exe = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+        Exe = $exePath
         StartDir = $VhdDir
         icon = if ($IconPath -and (Test-Path $IconPath)) { $IconPath } else { "" }
         ShortcutPath = ""
@@ -554,6 +545,15 @@ if ($Action -eq 'add-desktop-shortcut') {
         FlatpakAppID = ""
         LastPlayTime = "/Date($([int]([DateTimeOffset]::Now.ToUnixTimeSeconds())))/"
         tags = @{}
+    }
+
+    # 追加新快捷方式
+    # Find the next available key number for the shortcuts dictionary
+    $nextKey = 0
+    if ($shortcuts.shortcuts.Keys.Count -gt 0) {
+        # Get the highest existing key number and add 1
+        $existingKeys = [int[]]$shortcuts.shortcuts.Keys | Sort-Object
+        $nextKey = $existingKeys[-1] + 1
     }
 
     $shortcuts.shortcuts["$nextKey"] = $newShortcut
@@ -584,6 +584,7 @@ if ($Action -eq 'add-desktop-shortcut') {
         Stop-Transcript
         exit 0
     }
+
     $shortcuts | ConvertTo-Json -Depth 10
     Write-Host "Action 'print-steam-shortcuts' completed."
     Stop-Transcript
