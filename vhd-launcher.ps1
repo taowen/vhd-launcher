@@ -2,7 +2,7 @@ param(
     [Parameter(Mandatory = $false)]
     [string]$VhdPath,
     [Parameter(Mandatory = $false)]
-    [ValidateSet('launch', 'add-desktop-shortcut', 'add-steam-shortcut', 'print-steam-shortcuts')]
+    [ValidateSet('launch', 'add-desktop-shortcut', 'add-steam-shortcut', 'print-steam-shortcuts', 'download-artwork')]
     [string]$Action = 'launch'
 )
 
@@ -519,7 +519,7 @@ function Download-SteamGridVertical {
         Write-Host "No 600x900 grid artwork found."
         return $null
     }
-    $url = $vertical[0].thumb
+    $url = $vertical[0].url
     $ext = [System.IO.Path]::GetExtension($url)
     if (-not $OutputDir) {
         $OutputDir = (Get-SteamArtworkDir)
@@ -527,8 +527,7 @@ function Download-SteamGridVertical {
     if (-not (Test-Path $OutputDir)) {
         New-Item -ItemType Directory -Path $OutputDir | Out-Null
     }
-    $prefix = Get-SteamArtworkPrefix $AppId
-    $filename = "${prefix}p$ext"
+    $filename = "grid-vertical$ext"
     $filepath = Join-Path $OutputDir $filename
     Invoke-WebRequest -Uri $url -OutFile $filepath -UseBasicParsing
     Write-Host "Downloaded grid-vertical to $filepath"
@@ -553,7 +552,7 @@ function Download-SteamGridHorizontal {
         Write-Host "No 920x430 grid artwork found."
         return $null
     }
-    $url = $horizontal[0].thumb
+    $url = $horizontal[0].url
     $ext = [System.IO.Path]::GetExtension($url)
     if (-not $OutputDir) {
         $OutputDir = (Get-SteamArtworkDir)
@@ -561,11 +560,76 @@ function Download-SteamGridHorizontal {
     if (-not (Test-Path $OutputDir)) {
         New-Item -ItemType Directory -Path $OutputDir | Out-Null
     }
-    $prefix = Get-SteamArtworkPrefix $AppId
-    $filename = "${prefix}$ext"
+    $filename = "grid-horizontal$ext"
     $filepath = Join-Path $OutputDir $filename
     Invoke-WebRequest -Uri $url -OutFile $filepath -UseBasicParsing
     Write-Host "Downloaded grid-horizontal to $filepath"
+    return $filepath
+}
+
+function Download-SteamGridLogo {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$SteamGridId,
+        [Parameter(Mandatory = $true)]
+        [int]$AppId,
+        [string]$OutputDir
+    )
+    $artworks = Get-SteamGridArtwork -Type 'logos' -SteamGridId $SteamGridId
+    if (-not $artworks -or -not $artworks.data) {
+        Write-Host "No logo artworks found for $SteamGridId"
+        return $null
+    }
+    $logo = $artworks.data[0]
+    if (-not $logo) {
+        Write-Host "No logo artwork found."
+        return $null
+    }
+    $url = $logo.url
+    $ext = [System.IO.Path]::GetExtension($url)
+    if (-not $OutputDir) {
+        $OutputDir = (Get-SteamArtworkDir)
+    }
+    if (-not (Test-Path $OutputDir)) {
+        New-Item -ItemType Directory -Path $OutputDir | Out-Null
+    }
+    $filename = "logo$ext"
+    $filepath = Join-Path $OutputDir $filename
+    Invoke-WebRequest -Uri $url -OutFile $filepath -UseBasicParsing
+    Write-Host "Downloaded logo to $filepath"
+    return $filepath
+}
+
+function Download-SteamGridHero {
+    param(
+        [Parameter(Mandatory = $true)]
+        [int]$SteamGridId,
+        [Parameter(Mandatory = $true)]
+        [int]$AppId,
+        [string]$OutputDir
+    )
+    $artworks = Get-SteamGridArtwork -Type 'heroes' -SteamGridId $SteamGridId
+    if (-not $artworks -or -not $artworks.data) {
+        Write-Host "No hero artworks found for $SteamGridId"
+        return $null
+    }
+    $hero = $artworks.data[0]
+    if (-not $hero) {
+        Write-Host "No hero artwork found."
+        return $null
+    }
+    $url = $hero.url
+    $ext = [System.IO.Path]::GetExtension($url)
+    if (-not $OutputDir) {
+        $OutputDir = (Get-SteamArtworkDir)
+    }
+    if (-not (Test-Path $OutputDir)) {
+        New-Item -ItemType Directory -Path $OutputDir | Out-Null
+    }
+    $filename = "hero$ext"
+    $filepath = Join-Path $OutputDir $filename
+    Invoke-WebRequest -Uri $url -OutFile $filepath -UseBasicParsing
+    Write-Host "Downloaded hero to $filepath"
     return $filepath
 }
 
@@ -776,6 +840,30 @@ if ($Action -eq 'add-desktop-shortcut') {
 
     $shortcuts | ConvertTo-Json -Depth 10
     Write-Host "Action 'print-steam-shortcuts' completed."
+    Stop-Transcript
+    exit 0
+} elseif ($Action -eq 'download-artwork') {
+    $appName = if ($ini['appName']) { $ini['appName'] } else { [System.IO.Path]::GetFileNameWithoutExtension($VhdPath) }
+    $exePath = "C:\Windows\System32\WindowsPowerShell\v1.0\powershell.exe"
+    $appid = Get-SteamShortcutId -ExePath $exePath -AppName $appName
+
+    # 优先从 ini 读取 steamGridId
+    if ($ini.ContainsKey('steamGridId') -and $ini['steamGridId']) {
+        $steamGridId = $ini['steamGridId']
+        Write-Host "Using steamGridId from ini: $steamGridId"
+    } else {
+        $steamGridId = Get-SteamGridId -AppName $appName
+    }
+
+    if (-not $steamGridId) {
+        Write-Host "No SteamGridId found for $appName, skipping download."
+        Stop-Transcript
+        exit 1
+    }
+    Download-SteamGridHorizontal -SteamGridId $steamGridId -AppId $appid -OutputDir $VhdDir
+    Download-SteamGridVertical -SteamGridId $steamGridId -AppId $appid -OutputDir $VhdDir
+    Download-SteamGridLogo -SteamGridId $steamGridId -AppId $appid -OutputDir $VhdDir
+    Download-SteamGridHero -SteamGridId $steamGridId -AppId $appid -OutputDir $VhdDir
     Stop-Transcript
     exit 0
 }
