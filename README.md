@@ -31,3 +31,8 @@ this will mount the vhd and launch the game, it will also
 * create a desktop link (optionally, you can provide a ico file to make it pretty)
 
 the files can be copied to other machines
+
+# MSI Claw Handheld
+
+* 体感助手 https://www.bilibili.com/video/BV1xHo6YgEfK/
+* Handheld Companion https://github.com/Valkirie/HandheldCompanion
